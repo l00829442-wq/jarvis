@@ -113,6 +113,15 @@ FUNCTION_DECLARATIONS = [
         "parameters": {"type": "OBJECT", "properties": {"query": {"type": "STRING"}}, "required": ["query"]},
     },
     {
+        "name": "deep_research",
+        "description": ("Kullanicinin 'detayli arastir', 'internetten arastir', 'bütün sitelere bak', "
+                        "'kapsamli bilgi ver' gibi isteklerinde kullanilir. Ilgili web sayfalarini acip "
+                        "iceriklerini okur ve ayrintili bilgi toplar."),
+        "parameters": {"type": "OBJECT", "properties": {
+            "query": {"type": "STRING", "description": "Arastirilacak konu veya soru"}},
+            "required": ["query"]},
+    },
+    {
         "name": "get_weather",
         "description": "Bir sehir icin guncel hava durumunu ve 3 gunluk tahmini verir.",
         "parameters": {"type": "OBJECT", "properties": {"city": {"type": "STRING", "description": "Sehir adi, orn. 'Istanbul'"}}, "required": ["city"]},
@@ -129,6 +138,29 @@ FUNCTION_DECLARATIONS = [
             "base": {"type": "STRING", "description": "Kaynak doviz kodu, orn. 'USD', 'EUR'"},
             "to": {"type": "STRING", "description": "Hedef doviz kodu, varsayilan 'TRY'"}},
             "required": ["base"]},
+    },
+    {
+        "name": "save_contact",
+        "description": "Rehbere kisi kaydeder. Kullanici 'rehberime Ali ekle 0532...' dediginde kullan.",
+        "parameters": {"type": "OBJECT", "properties": {
+            "name": {"type": "STRING", "description": "Kisi adi"},
+            "phone": {"type": "STRING", "description": "Telefon numarasi"}},
+            "required": ["name", "phone"]},
+    },
+    {
+        "name": "call_contact",
+        "description": "Rehberdeki bir kisiyi arar (telefon uygulamasini açar). 'Ali'yi ara' gibi isteklerde kullan.",
+        "parameters": {"type": "OBJECT", "properties": {
+            "name": {"type": "STRING", "description": "Aranacak kisinin adi"}},
+            "required": ["name"]},
+    },
+    {
+        "name": "send_sms",
+        "description": "Rehberdeki bir kisye SMS mesaji hazirlar. 'Ali'ye mesaj at: ...' gibi isteklerde kullan.",
+        "parameters": {"type": "OBJECT", "properties": {
+            "name": {"type": "STRING", "description": "Mesaj gonderilecek kisinin adi"},
+            "message": {"type": "STRING", "description": "Mesaj metni"}},
+            "required": ["name"]},
     },
 ]
 
@@ -177,6 +209,77 @@ _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 
 
+def _decode_bing(href):
+    """Bing sonuc linklerindeki bing.com/ck/a?u=... yonlendirmesini gercek URL'ye cevirir."""
+    import base64 as _b64
+    import urllib.parse as _up
+    m = re.search(r"[?&]u=([^&]+)", href or "")
+    if not m:
+        return href
+    val = _up.unquote(m.group(1))
+    if val.startswith("a1"):
+        val = val[2:]
+    try:
+        val += "=" * (-len(val) % 4)
+        return _b64.urlsafe_b64decode(val).decode("utf-8", "ignore")
+    except Exception:  # noqa: BLE001
+        return href
+
+
+def _bing_search(query, limit=6, timeout=20):
+    """Bing (anahtarsiz) ile web arama sonuclari."""
+    import html as _html
+    import urllib.parse as _up
+    url = "https://www.bing.com/search?q=" + _up.quote(query or "") + "&setlang=tr"
+    req = urllib.request.Request(url, headers={
+        "User-Agent": _UA, "Accept-Language": "tr-TR,tr;q=0.9"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        page = resp.read().decode("utf-8", "ignore")
+    out = []
+    for b in re.findall(r'<li class="b_algo".*?</li>', page, re.S):
+        m = re.search(r'<h2[^>]*>\s*<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>', b, re.S)
+        if not m:
+            continue
+        link = _decode_bing(_html.unescape(m.group(1)))
+        title = _html.unescape(re.sub(r"<[^>]+>", "", m.group(2))).strip()
+        sm = re.search(r'<p[^>]*>(.*?)</p>', b, re.S)
+        snip = _html.unescape(re.sub(r"<[^>]+>", "", sm.group(1))).strip() if sm else ""
+        if title:
+            out.append({"title": title, "url": link, "snippet": snip})
+    return out[:limit]
+
+
+def _search_items(query, limit=6):
+    """Kullanilabilir arama motorlarini sirayla dener."""
+    for fn in (_bing_search, _ddg_search):
+        try:
+            items = fn(query, limit=limit)
+            if items:
+                return items
+        except Exception:  # noqa: BLE001
+            continue
+    return []
+
+
+def _ddg_instant(query, timeout=15):
+    """DuckDuckGo anlik yanit API'si (anahtarsiz) - ozet/abstract verir."""
+    import urllib.parse as _up
+    url = ("https://api.duckduckgo.com/?format=json&no_html=1&no_redirect=1&q="
+           + _up.quote(query or ""))
+    req = urllib.request.Request(url, headers={"User-Agent": _UA})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        d = json.loads(resp.read().decode("utf-8", "ignore"))
+    parts = []
+    if d.get("AbstractText"):
+        parts.append(d["AbstractText"])
+    if d.get("Answer"):
+        parts.append(str(d["Answer"]))
+    for t in (d.get("RelatedTopics") or [])[:5]:
+        if isinstance(t, dict) and t.get("Text"):
+            parts.append(t["Text"])
+    return "\n".join(parts).strip()
+
+
 def _ddg_search(query, limit=5, timeout=20):
     """DuckDuckGo (lite, anahtarsiz) ile web arama sonuclari."""
     import html as _html
@@ -222,27 +325,32 @@ def _wiki_search(query, limit=3, timeout=20):
 
 
 def _web_search(cfg, query):
-    """Guncel bilgi icin web'de arar: anahtarsiz DDG + Wikipedia; son care model
-    'grounding'. Sonucu araci cagiran modele metin olarak dondurur."""
+    """Guncel bilgi icin web'de arar: anahtarsiz Bing/DDG + Wikipedia; son care
+    model 'grounding'. Sonucu araci cagiran modele metin olarak dondurur."""
     query = (query or "").strip()
     if not query:
         return {"ok": False, "hata": "Sorgu bos"}
     # 1) Anahtarsiz arama (kota harcamaz)
+    items = _search_items(query)
+    if items:
+        lines = ["Web sonuclari (%s):" % query]
+        for it in items:
+            line = "- " + it["title"]
+            if it.get("snippet"):
+                line += ": " + it["snippet"]
+            if it.get("url"):
+                line += " [%s]" % it["url"]
+            lines.append(line)
+        return {"ok": True, "kaynak": "web", "sonuc": "\n".join(lines)}
+    # 2) DuckDuckGo anlik yanit (ozet)
     try:
-        items = _ddg_search(query)
-        if items:
-            lines = ["Web sonuclari (%s):" % query]
-            for it in items:
-                line = "- " + it["title"]
-                if it.get("snippet"):
-                    line += ": " + it["snippet"]
-                if it.get("url"):
-                    line += " [%s]" % it["url"]
-                lines.append(line)
-            return {"ok": True, "kaynak": "duckduckgo", "sonuc": "\n".join(lines)}
+        abstract = _ddg_instant(query)
+        if abstract:
+            return {"ok": True, "kaynak": "duckduckgo",
+                    "sonuc": "Web ozeti (%s):\n%s" % (query, abstract)}
     except Exception:  # noqa: BLE001
         pass
-    # 2) Wikipedia
+    # 3) Wikipedia
     try:
         wikis = _wiki_search(query)
         if wikis:
@@ -252,7 +360,7 @@ def _web_search(cfg, query):
             return {"ok": True, "kaynak": "wikipedia", "sonuc": "\n".join(lines)}
     except Exception:  # noqa: BLE001
         pass
-    # 3) Model grounding (varsa)
+    # 4) Model grounding (varsa)
     return _web_search_grounding(cfg, query)
 
 
@@ -281,6 +389,56 @@ def _web_search_grounding(cfg, query):
         return {"ok": False, "hata": str(exc)}
 
 
+def _read_page(url, limit=5000, timeout=15):
+    """Bir web sayfasini indirip okunabilir metne indirger."""
+    import html as _html
+    if not url or not re.match(r"^https?://", url):
+        return ""
+    req = urllib.request.Request(url, headers={"User-Agent": _UA})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        raw = resp.read(500000)
+        ctype = resp.headers.get("Content-Type", "") or ""
+    m = re.search(r"charset=([\w\-]+)", ctype, re.I)
+    enc = m.group(1) if m else "utf-8"
+    try:
+        html = raw.decode(enc, "ignore")
+    except Exception:  # noqa: BLE001
+        html = raw.decode("utf-8", "ignore")
+    html = re.sub(r"<(script|style|noscript|svg|head)[^>]*>.*?</\1>", " ", html, flags=re.S | re.I)
+    text = _html.unescape(re.sub(r"<[^>]+>", " ", html))
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:limit]
+
+
+def _deep_research(cfg, query):
+    """Birden fazla kaynagi acip iceriklerini okuyarak ayrintili arastirma yapar."""
+    query = (query or "").strip()
+    if not query:
+        return {"ok": False, "hata": "Sorgu bos"}
+    items = []
+    try:
+        items = _search_items(query, limit=6)
+    except Exception:  # noqa: BLE001
+        items = []
+    chunks = []
+    for it in items[:4]:
+        url = it.get("url") or ""
+        if not url:
+            continue
+        try:
+            page = _read_page(url)
+        except Exception:  # noqa: BLE001
+            page = ""
+        if page and len(page) > 120:
+            chunks.append("### %s\n%s\n%s" % (it.get("title", ""), url, page))
+        if sum(len(c) for c in chunks) > 9000:
+            break
+    if chunks:
+        return {"ok": True, "kaynak": "derin_arastirma",
+                "sonuc": ("Ayrintili arastirma sonuclari (%s):\n\n" % query) + "\n\n".join(chunks)[:12000]}
+    return _web_search(cfg, query)
+
+
 def execute_tool(name, args, memory, cfg):
     args = args or {}
     try:
@@ -306,6 +464,8 @@ def execute_tool(name, args, memory, cfg):
             return tools.list_files()
         if name == "web_search":
             return _web_search(cfg, args.get("query"))
+        if name == "deep_research":
+            return _deep_research(cfg, args.get("query"))
         if name == "get_weather":
             reply, w = tools.weather_reply(args.get("city") or "Istanbul")
             if w.get("ok"):
@@ -328,9 +488,51 @@ def execute_tool(name, args, memory, cfg):
         if name == "recall":
             hits = memory.search(args.get("query")) if memory else []
             return {"ok": True, "sonuclar": [h[1] for h in hits]}
+        if name == "save_contact":
+            contacts = getattr(memory, "contacts", None)
+            if not contacts:
+                return {"ok": False, "hata": "Rehber kullanilamiyor"}
+            cname = (args.get("name") or "").strip()
+            phone = (args.get("phone") or "").strip()
+            cid = contacts.save(cname, phone)
+            if cid:
+                return {"ok": True, "kaydedildi": cname, "id": cid}
+            return {"ok": False, "hata": "Isim ve telefon gerekli"}
+        if name == "call_contact":
+            return _call_result(memory, args.get("name"))
+        if name == "send_sms":
+            return _sms_result(memory, args.get("name"), args.get("message"))
         return {"ok": False, "hata": "Bilinmeyen arac: " + str(name)}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "hata": str(exc)}
+
+
+def _call_result(memory, name):
+    contacts = getattr(memory, "contacts", None)
+    name = (name or "").strip()
+    if not contacts:
+        return {"ok": False, "hata": "Rehber kullanilamiyor"}
+    row = contacts.find(name)
+    if not row:
+        return {"ok": False, "hata": "Rehberde bulunamadi: " + name,
+                "oneri": "Rehberime %s ekle 05xx ile kaydedebilirsiniz." % name}
+    cname, phone = row[1], row[2]
+    return {"ok": True, "contact": cname, "phone": phone,
+            "call_url": tools.tel_url(phone)}
+
+
+def _sms_result(memory, name, message):
+    contacts = getattr(memory, "contacts", None)
+    name = (name or "").strip()
+    if not contacts:
+        return {"ok": False, "hata": "Rehber kullanilamiyor"}
+    row = contacts.find(name)
+    if not row:
+        return {"ok": False, "hata": "Rehberde bulunamadi: " + name,
+                "onerisi": "Rehberime %s ekle 05xx ile kaydedebilirsiniz." % name}
+    cname, phone = row[1], row[2]
+    return {"ok": True, "contact": cname, "phone": phone,
+            "sms_url": tools.sms_url(phone, message or "")}
 
 
 def _build_contents(messages):
@@ -449,20 +651,60 @@ def fast_path(text, memory):
         q = _youtube_query(text)
         url = tools.youtube_url(q)
         reply = ("YouTube'da '%s' ariyorum efendim." % q) if q else "YouTube aciliyor efendim."
-        return done("play_youtube", {"ok": True, "url": url}, reply)
+        return done("play_youtube", {"ok": True, "url": url, "label": "▶ YouTube'da aç"}, reply)
 
-    # --- Uygulama / site açma ---
-    if any(k in t for k in ("aç", "ac ", "açar mısın", "acar misin", "başlat", "baslat", "açsana")):
-        alias = _match_app(t)
-        if alias:
-            if not tools.IS_WINDOWS:
-                web = tools.app_web_url(alias) or (alias if alias.startswith("http") else None)
-                if web:
-                    return done("open_app", {"ok": True, "url": web}, "%s web'de aciliyor efendim." % alias)
-            res = tools.open_app(alias)
+    # --- Rehber: kaydet ---
+    if any(k in t for k in ("rehberime", "rehberimden")) and any(k in t for k in ("ekle", "kaydet", "kayıt", "kayit")):
+        phone = _phone_from_text(text)
+        names = [w for w in _contact_entity(text) if not w.isdigit()]
+        cname = " ".join(names).strip().title()
+        if cname and phone and memory is not None and getattr(memory, "contacts", None):
+            cid = memory.contacts.save(cname, phone)
+            return done("save_contact", {"ok": bool(cid), "kaydedildi": cname},
+                        "%s rehberinize kaydedildi efendim (%s)." % (cname, phone))
+        return done("save_contact", {"ok": False, "hata": "isim/telefon eksik"},
+                    "Rehberime eklemek icin: 'Rehberime Ali ekle 0532 123 45 67' gibi soyleyin efendim.")
+
+    # --- Rehber: ara / mesaj ---
+    _callsms_excl = any(k in t for k in ("şarkı", "sarki", "müzik", "muzik", "video", "youtube", "haber"))
+    is_call = (not _callsms_excl) and bool(re.search(
+        r"(arar\s*m[ıi]s[ıi]n|arayabilir\s*m[ıi]s[ıi]n|telefonla\s*ara|telefon\s*et|(?<!\w)ara(?!\w))", t)) \
+        and not any(k in t for k in ("araştır", "araştırma", "arama"))
+    is_sms = any(k in t for k in ("mesaj at", "mesaj gönder", "mesaj gonder", "mesaj yaz",
+                                  "sms at", "sms gönder", "sms gonder", "mesaj çek", "mesaj cek"))
+    if is_call or is_sms:
+        if is_sms:
+            before, msg = _split_trigger(text, ["mesaj at", "mesaj gönder", "mesaj gonder",
+                                                "mesaj yaz", "sms at", "sms gönder", "sms gonder",
+                                                "mesaj çek", "mesaj cek"])
+        else:
+            before, msg = text, ""
+        cname = " ".join(_contact_entity(before)).strip()
+        if cname:
+            if is_sms:
+                res = _sms_result(memory, cname, msg)
+                if res.get("ok"):
+                    extra = (" Mesaj: %s" % msg) if msg else ""
+                    return done("send_sms", res, "%s icin mesaj hazir efendim 💬%s" % (res["contact"], extra))
+                return done("send_sms", res,
+                            "Rehberde '%s' bulamadim efendim. 'Rehberime %s ekle 05xx...' ile kaydedin."
+                            % (cname, cname.title()))
+            res = _call_result(memory, cname)
             if res.get("ok"):
-                return done("open_app", res, "%s aciliyor efendim." % alias)
+                return done("call_contact", res, "%s araniyor efendim 📞" % res["contact"])
+            return done("call_contact", res,
+                        "Rehberde '%s' bulamadim efendim. 'Rehberime %s ekle 05xx...' ile kaydedin."
+                        % (cname, cname.title()))
+
+    # --- Uygulama / site açma (masaustu program, web veya mobil deep-link) ---
+    if any(k in t for k in ("aç", "ac ", "açar mısın", "acar misin", "başlat", "baslat", "açsana")):
+        app = _match_app_name(t)
+        if app:
+            res = tools.open_app(app)
+            if res.get("ok"):
+                return done("open_app", res, "%s aciliyor efendim." % app.title())
             return done("open_app", res, "Acilamadi: %s" % res.get("hata"))
+
 
     # --- Hafıza: kaydet ---
     low = text.lower()
@@ -488,6 +730,15 @@ def fast_path(text, memory):
 def _match_app(t):
     for alias in sorted(tools.APP_ALIASES, key=len, reverse=True):
         if alias in t:
+            return alias
+    return None
+
+
+def _match_app_name(t):
+    """Masaustu, web ve deep-link haritalarindan en uzun eslesen uygulama adini bulur."""
+    names = set(tools.APP_ALIASES) | set(tools.APP_WEB) | set(tools.APP_SCHEME)
+    for alias in sorted(names, key=len, reverse=True):
+        if len(alias) >= 3 and alias in t:
             return alias
     return None
 
@@ -538,6 +789,55 @@ def _currency_from_text(text):
     return "USD"
 
 
+_SUFFIX = {"yi", "yı", "yu", "yü", "ye", "ya", "i", "ı", "u", "ü", "e", "a",
+           "im", "ın", "in", "un", "ün", "den", "dan", "ten", "tan", "nin", "nın"}
+_REH_TRIG = {"rehberime", "rehberimden", "rehberden", "rehber", "ekle", "kaydet",
+             "kayıt", "kayit", "ara", "arar", "mısın", "misin", "musun", "müsün",
+             "telefon", "et", "mesaj", "at", "gönder", "gonder", "yaz", "sms",
+             "whatsapp", "whatsapptan", "bana", "lütfen", "lutfen", "no", "numara"}
+
+
+def _contact_entity(text):
+    """Metinden kisi adi adaylarini (fazlaliklari atarak) cikarir."""
+    t = _tr_lower(text).replace("'", " ").replace("’", " ")
+    for tr in ("arar mısın", "arar misin", "ararmisin", "arayabilir misin",
+               "telefonda ara", "telefonla ara", "telefon et", "mesaj gönder",
+               "mesaj gonder", "mesaj at", "mesaj yaz", "sms gönder", "sms gonder", "sms at"):
+        t = t.replace(tr, " ")
+    words = re.findall(r"[a-zçğıöşü]+", t)
+    out = []
+    for w in words:
+        if w in _FILLER or w in _SUFFIX or w in _REH_TRIG:
+            continue
+        if w.startswith("telefon") or w.startswith("whatsapp"):
+            continue
+        out.append(w)
+    return out
+
+
+def _phone_from_text(text):
+    m = re.search(r"(\+?\d[\d\s\-]{6,}\d)", text or "")
+    return m.group(1).strip() if m else ""
+
+
+def _message_after(text, triggers):
+    low = _tr_lower(text)
+    for tr in triggers:
+        i = low.find(tr)
+        if i >= 0:
+            return text[i + len(tr):].lstrip(" :,-").strip()
+    return ""
+
+
+def _split_trigger(text, triggers):
+    low = _tr_lower(text)
+    for tr in triggers:
+        i = low.find(tr)
+        if i >= 0:
+            return text[:i].strip(" :,-"), text[i + len(tr):].lstrip(" :,-").strip()
+    return text, ""
+
+
 def system_info_reply():
     info = tools.system_info()
     lines = ["Sistem bilgileri efendim:"]
@@ -570,19 +870,39 @@ def _system_prompt(cfg, messages, memory=None):
         system += "\n\n" + mem_ctx
     system += (
         "\n\nElinde araclar var (uygulama/site acma, ses, ekran goruntusu, sistem "
-        "bilgisi, hafiza, dosya, web arama). Bir gorevi yerine getirmek icin "
-        "gerekiyorsa aciklama yapmadan ilgili araci cagir; sonuc gelince kisa bir "
-        "Turkce cevap ver. Gereksiz arac cagirma."
+        "bilgisi, hafiza, dosya, web arama, derin arastirma). Bir gorevi yerine "
+        "getirmek icin gerekiyorsa aciklama yapmadan ilgili araci cagir; sonuc "
+        "gelince kisa bir Turkce cevap ver. Gereksiz arac cagirma.\n"
+        "- Guncel/kesin bilgi (haber, mac, fiyat, urun, yer, kisi) icin once "
+        "web_search; kullanici 'detayli arastir' derse deep_research kullan.\n"
+        "- Emin olmadigin bir seyi uydurma; arastirip kaynaga dayan."
     )
+    has_image = any(m.get("image") for m in (messages or []))
+    if has_image:
+        system += (
+            "\n\nKullanici bir GORSEL gonderdi. Once gorseli ayrintili incele "
+            "(ne goruyorsun: nesne, yer, kisi, urun, yazi, marka). Eger kullanici "
+            "gorsel hakkinda bilgi istiyorsa (bu ne, nerede, kim, fiyati ne, ne "
+            "yaziyor) tanimladiktan sonra gerekirse web_search veya deep_research "
+            "ile internetten dogrula ve birlesik, net bir cevap ver."
+        )
     if not tools.IS_WINDOWS:
         system += (
-            "\n\nONEMLI: Su an WEB/tarayici ortamindasin (kullanicinin telefonu veya "
-            "tabletinde). Bilgisayara ozel araclar (open_app ile program acma, ses "
+            "\n\nONEMLI: Su an WEB/mobil ortamdasin (kullanicinin telefonu veya "
+            "tabletinde). Bilgisayara ozel araclar (masaustu program acma, ses "
             "kontrolu, ekran goruntusu, ekran kilitleme, dosya islemleri) BU ORTAMDA "
             "CALISMAZ; bunlari denemek yerine kullaniciya bunun yalnizca bilgisayar "
-            "uygulamasinda oldugunu kibarca soyle. Muzik/video icin play_youtube "
-            "(YouTube arama acar), guncel bilgi icin get_weather veya web_search, "
-            "doviz kuru icin get_exchange_rate araclarini kullan."
+            "uygulamasinda oldugunu kibarca soyle. Muzik/video icin play_youtube, "
+            "uygulama/site acmak icin open_app (Instagram/YouTube gibi uygulamalar "
+            "deep-link ile acilir), arama icin call_contact, mesaj icin send_sms, "
+            "kisi kaydetmek icin save_contact, guncel bilgi icin get_weather veya "
+            "web_search, doviz icin get_exchange_rate kullan."
+        )
+    else:
+        system += (
+            "\n\nMasaustunde bilgisayar araclari (uygulama acma, ses, ekran, dosya) "
+            "calisir. Arama/mesaj (call_contact/send_sms) ve kisi kaydetme "
+            "(save_contact) de kullanilabilir."
         )
     return system
 

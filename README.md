@@ -23,17 +23,25 @@ Sesle konuşan, soruları yanıtlayan ve hatırlatan ücretsiz bir Jarvis asista
 ## Özellikler
 - 🎤 **Sesle dinleme** ve 🔊 **sesli cevaplama**; 👂 **"Hey Jarvis"** ile eller serbest
 - 🧠 **Kalıcı hafıza**: "Hatırla: ..." ile bilgi kaydeder, sonra hatırlar (hafıza penceresi)
+- 📞 **Rehber + arama/mesaj**: "Rehberime Ali ekle 0532..." ile kaydet; "Ali'yi ara" /
+  "Ali'ye mesaj at ..." de — telefonda `tel:` / `sms:` ile arama ve mesaj başlatılır
+- 📱 **Uygulama açma (mobil)**: "Instagram'ı aç" gibi komutlar telefonda deep-link
+  (`instagram://`, `whatsapp://` …) ile uygulamayı, olmazsa web sürümünü açar
 - 🛠️ **Araç kullanımı (ajan)**: uygulama/site açma, sistem bilgisi, ekran görüntüsü,
   kilit, ses denetimi, dosya yaz/oku/listele, web arama (ReAct/function-calling)
 - 🖼️ **Görsel anlama (vision)**: görsel yükle / sürükle-bırak / Ctrl+V → Jarvis inceler
-- 🔎 **Güncel bilgi (kota dostu)**: **anahtarsız** web arama (DuckDuckGo + Wikipedia),
-  🌤️ **hava durumu** (Open-Meteo), 💱 **döviz kuru** (frankfurter) — ekstra ücret yok
+  ve gerekirse internetten doğrular
+- 🔎 **Güncel bilgi + derin araştırma**: **anahtarsız** web arama (Bing + DuckDuckGo +
+  Wikipedia), "detaylı araştır" deyince **sayfaları açıp içeriklerini okur** (`deep_research`),
+  🌤️ **hava durumu** (Open-Meteo → wttr.in), 💱 **döviz kuru** (frankfurter → er-api)
+- ⏰ **Doğru saat dilimi**: istemci saat dilimi sunucuya iletilir (Europe/Istanbul)
+- 🩺 **Kendini test etme**: 🩺 butonu / `GET /api/selfcheck` ile sağlayıcı ve tüm araçları test eder
 - 🎵 **Müzik/video**: "YouTube'dan ... çal" dediğinde sonuç bağlantısı sayfada açılır
   (bulut/telefonda bile çalışır, çünkü bağlantı tarayıcıda açılır)
 - 🌐 **Çok sağlayıcı**: Gemini, ChatGPT (OpenAI), **DeepSeek**, Groq, OpenRouter —
   Ayarlar'dan seçilir; araç çağırma açık uyumlu modellerde çalışır
-- ⚡ **Akıllı komutlar** ve **hızlı yol** (hava/döviz/YouTube/saat gibi net komutlar
-  ~0.1 sn'de, LLM ve kota harcamadan)
+- ⚡ **Akıllı komutlar** ve **hızlı yol** (hava/döviz/YouTube/rehber/saat gibi net
+  komutlar ~0.1 sn'de, LLM ve kota harcamadan)
 - ⏰ Sesli hatırlatıcılar, 🔔 bildirimler, 🏠 IFTTT/webhook akıllı ev kısayolları
 - 🔄 **Kendini güncelleme**: arayüz otomatik yenilenir; `.exe` (opsiyonel `update_url` ile)
 - 📴 API anahtarı olmasa bile **çevrimdışı modda** çalışır

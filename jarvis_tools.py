@@ -15,12 +15,56 @@ import platform
 import subprocess
 import webbrowser
 import json
+import datetime as _dt
+import threading
 import urllib.request
 import urllib.parse
+
+try:
+    from zoneinfo import ZoneInfo
+except Exception:  # noqa: BLE001
+    ZoneInfo = None
 
 IS_WINDOWS = os.name == "nt"
 
 WORK_DIR = os.path.join(os.path.expanduser("~"), "Documents", "Jarvis")
+
+# --- Saat dilimi (varsayilan Turkiye +3; istemci kendi offset'ini gonderir) ---
+_TZ_LOCAL = threading.local()
+DEFAULT_TZ = os.environ.get("JARVIS_TZ") or "Europe/Istanbul"
+DEFAULT_OFFSET_MIN = 180  # Europe/Istanbul = UTC+3
+
+
+def set_timezone_offset(minutes):
+    """Istemcinin UTC offset'i (dakika, doguya pozitif). Orn. 180 = UTC+3)."""
+    try:
+        _TZ_LOCAL.offset = int(minutes)
+    except (TypeError, ValueError):
+        _TZ_LOCAL.offset = None
+
+
+def set_timezone(name):
+    """Bu istek/thread icin IANA saat dilimi (orn. 'Europe/Istanbul')."""
+    _TZ_LOCAL.name = (name or "").strip() or None
+    _TZ_LOCAL.offset = None
+
+
+def _current_tz_name():
+    return getattr(_TZ_LOCAL, "name", None) or DEFAULT_TZ
+
+
+def _current_tz():
+    off = getattr(_TZ_LOCAL, "offset", None)
+    if off is not None:
+        return _dt.timezone(_dt.timedelta(minutes=off))
+    name = getattr(_TZ_LOCAL, "name", None) or DEFAULT_TZ
+    if ZoneInfo is not None:
+        try:
+            return ZoneInfo(name)
+        except Exception:  # noqa: BLE001
+            pass
+    return _dt.timezone(_dt.timedelta(minutes=DEFAULT_OFFSET_MIN))
+
 
 
 def _ensure_work_dir():
@@ -77,14 +121,61 @@ def app_web_url(name):
     return APP_WEB.get((name or "").strip().lower())
 
 
+# Mobil uygulama deep-link semalari (telefonda ilgili uygulamayi acar)
+APP_SCHEME = {
+    "youtube": "youtube://", "you tube": "youtube://",
+    "spotify": "spotify://",
+    "whatsapp": "whatsapp://",
+    "instagram": "instagram://",
+    "twitter": "twitter://", "x": "twitter://",
+    "facebook": "fb://",
+    "telegram": "tg://",
+    "twitterx": "twitter://",
+    "maps": "geo:0,0?q=", "harita": "geo:0,0?q=",
+    "netflix": "nflx://",
+    "trendyol": "trendyol://",
+    "gmail": "googlegmail://", "mail": "googlegmail://",
+}
+
+
+def mobile_app_url(name):
+    """Telefonda uygulamayi dogrudan acan deep-link (yoksa None)."""
+    return APP_SCHEME.get((name or "").strip().lower())
+
+
+def normalize_phone(phone):
+    """Telefon numarasini tel: icin sadeleştirir (+90... -> +90...)."""
+    p = (phone or "").strip()
+    keep = [ch for ch in p if ch.isdigit() or ch == "+"]
+    p = "".join(keep)
+    if p.startswith("00"):
+        p = "+" + p[2:]
+    if p and not p.startswith("+") and p.startswith("0") and len(p) == 11:
+        p = "+90" + p[1:]
+    return p
+
+
+def tel_url(phone):
+    return "tel:" + normalize_phone(phone)
+
+
+def sms_url(phone, body=""):
+    p = normalize_phone(phone)
+    if body:
+        return "sms:%s?body=%s" % (p, urllib.parse.quote(body))
+    return "sms:" + p
+
+
 def get_datetime():
-    now = time.localtime()
+    tz = _current_tz()
+    now = _dt.datetime.now(tz) if tz else _dt.datetime.now()
     gunler = ["Pazartesi", "Sali", "Carsamba", "Persembe", "Cuma", "Cumartesi", "Pazar"]
     return {
-        "saat": time.strftime("%H:%M", now),
-        "tarih": time.strftime("%d.%m.%Y", now),
-        "gun": gunler[now.tm_wday],
-        "metin": time.strftime("%d.%m.%Y %H:%M", now),
+        "saat": now.strftime("%H:%M"),
+        "tarih": now.strftime("%d.%m.%Y"),
+        "gun": gunler[now.weekday()],
+        "metin": now.strftime("%d.%m.%Y %H:%M"),
+        "saat_dilimi": _current_tz_name(),
     }
 
 
@@ -98,23 +189,49 @@ def open_app(name):
     if any(h in low for h in URL_HINTS) or low.startswith("http"):
         url = name if low.startswith("http") else "https://" + name
         try:
-            webbrowser.open(url)
+            if IS_WINDOWS:
+                webbrowser.open(url)
+            return {"ok": True, "acilan": url, "url": url, "yapildi": IS_WINDOWS}
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "hata": str(exc)}
-        return {"ok": True, "acilan": url, "url": url}
 
-    target = APP_ALIASES.get(low, APP_ALIASES.get(low.strip(), name))
-    try:
-        if IS_WINDOWS:
+    target = APP_ALIASES.get(low) or APP_ALIASES.get(low.strip())
+    scheme = mobile_app_url(low)
+    web = app_web_url(low)
+
+    # Windows'ta bilinen masaustu programi ise dogrudan ac
+    if target and IS_WINDOWS:
+        try:
             if target.endswith(":"):
-                os.startfile(target)  # ms-settings: / outlookcal: gibi URI'ler
+                os.startfile(target)
             else:
                 subprocess.Popen(["cmd", "/c", "start", "", target], shell=False)
-        else:
-            subprocess.Popen([target])
-        return {"ok": True, "acilan": target}
-    except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "hata": str(exc)}
+            return {"ok": True, "acilan": target, "app": name, "yapildi": True}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "hata": str(exc)}
+
+    # Web adresi bilinen uygulama (tarayici veya mobil deep-link)
+    if web:
+        if IS_WINDOWS:
+            try:
+                webbrowser.open(web)
+            except Exception:  # noqa: BLE001
+                pass
+            return {"ok": True, "acilan": web, "url": web, "app": name, "yapildi": IS_WINDOWS}
+        return {"ok": True, "app": name, "scheme": scheme, "web": web}
+
+    # Sadece deep-link bilinen uygulama (telefonda)
+    if scheme:
+        return {"ok": True, "app": name, "scheme": scheme}
+
+    # Son care: masaustu program olarak dene (Windows)
+    if IS_WINDOWS:
+        try:
+            subprocess.Popen(["cmd", "/c", "start", "", name], shell=False)
+            return {"ok": True, "acilan": name, "app": name, "yapildi": True}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "hata": str(exc)}
+    return {"ok": False, "hata": "Uygulama bulunamadi: " + name}
 
 
 def open_url(url):
@@ -124,10 +241,11 @@ def open_url(url):
     if not url.startswith("http"):
         url = "https://" + url
     try:
-        webbrowser.open(url)
+        if IS_WINDOWS:
+            webbrowser.open(url)
+        return {"ok": True, "acilan": url, "url": url, "yapildi": IS_WINDOWS}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "hata": str(exc)}
-    return {"ok": True, "acilan": url, "url": url}
 
 
 # ---------------- Web yardimcilari (YouTube / Hava durumu) ----------------

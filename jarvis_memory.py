@@ -30,6 +30,7 @@ class MemoryStore:
     def __init__(self, path):
         self.path = path
         self._init_db()
+        self.contacts = ContactsStore(path)
 
     def _conn(self):
         c = sqlite3.connect(self.path, timeout=10)
@@ -116,3 +117,91 @@ class MemoryStore:
             return ""
         lines = [h[1] for h in hits]
         return "Kullanici hakkinda hatirladiklarin:\n- " + "\n- ".join(lines)
+
+
+class ContactsStore:
+    """Basit rehber: isim -> telefon. 'X'i ara / X'e mesaj at' icin kullanilir."""
+
+    def __init__(self, path):
+        self.path = path
+        self._init_db()
+
+    def _conn(self):
+        c = sqlite3.connect(self.path, timeout=10)
+        c.execute("PRAGMA journal_mode=WAL")
+        return c
+
+    def _init_db(self):
+        with _LOCK:
+            c = self._conn()
+            c.execute(
+                "CREATE TABLE IF NOT EXISTS contacts ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "name TEXT NOT NULL,"
+                "phone TEXT NOT NULL,"
+                "created REAL NOT NULL)"
+            )
+            c.commit()
+            c.close()
+
+    def save(self, name, phone):
+        name = (name or "").strip()
+        phone = (phone or "").strip()
+        if not name or not phone:
+            return None
+        with _LOCK:
+            c = self._conn()
+            row = c.execute(
+                "SELECT id FROM contacts WHERE lower(name) = lower(?)", (name,)
+            ).fetchone()
+            if row:
+                c.execute("UPDATE contacts SET phone = ? WHERE id = ?", (phone, row[0]))
+                cid = row[0]
+            else:
+                cur = c.execute(
+                    "INSERT INTO contacts (name, phone, created) VALUES (?, ?, ?)",
+                    (name, phone, time.time()),
+                )
+                cid = cur.lastrowid
+            c.commit()
+            c.close()
+        return cid
+
+    def all(self, limit=500):
+        with _LOCK:
+            c = self._conn()
+            rows = c.execute(
+                "SELECT id, name, phone, created FROM contacts ORDER BY name LIMIT ?",
+                (limit,),
+            ).fetchall()
+            c.close()
+        return rows
+
+    def find(self, name):
+        name = (name or "").strip().lower()
+        if not name:
+            return None
+        rows = self.all()
+        # once tam eslesme
+        for r in rows:
+            if r[1].lower() == name:
+                return r
+        # sonra iceren eslesme
+        for r in rows:
+            if name in r[1].lower() or r[1].lower() in name:
+                return r
+        return None
+
+    def forget(self, cid):
+        with _LOCK:
+            c = self._conn()
+            c.execute("DELETE FROM contacts WHERE id = ?", (cid,))
+            c.commit()
+            c.close()
+
+    def count(self):
+        with _LOCK:
+            c = self._conn()
+            n = c.execute("SELECT COUNT(*) FROM contacts").fetchone()[0]
+            c.close()
+        return n

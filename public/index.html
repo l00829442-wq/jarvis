@@ -18,7 +18,8 @@
         <span class="brand-name" id="assistantName">JARVIS</span>
       </div>
       <div class="topbar-actions">
-        <button class="icon-btn" id="memoryBtn" title="Hafıza">🧠</button>
+        <button class="icon-btn" id="memoryBtn" title="Hafıza ve Rehber">🧠</button>
+        <button class="icon-btn" id="selfcheckBtn" title="Kendini test et">🩺</button>
         <button class="icon-btn" id="wakeBtn" title="Uyandırma modu (Hey Jarvis)">👂</button>
         <button class="icon-btn" id="speakToggle" title="Sesli cevap">🔊</button>
         <button class="icon-btn" id="notifyBtn" title="Bildirimlere izin ver">🔔</button>
@@ -120,6 +121,16 @@
       </div>
       <div id="memList" class="mem-list"></div>
       <button class="wide-btn danger" id="memClearBtn">Tüm hafızayı temizle</button>
+
+      <h2 style="margin-top:18px">📞 Rehber</h2>
+      <p class="muted">Kayıtlı kişiler. "Rehberime Ali ekle 0532 123 45 67" diyerek ekleyin; sonra "Ali'yi ara" veya "Ali'ye mesaj at ..." diyebilirsiniz.</p>
+      <div class="memory-add">
+        <input type="text" id="contactName" placeholder="İsim" />
+        <input type="text" id="contactPhone" placeholder="Telefon" inputmode="tel" />
+        <button type="button" class="wide-btn" id="contactAddBtn">Ekle</button>
+      </div>
+      <div id="contactList" class="mem-list"></div>
+
       <button class="wide-btn" id="closeMemory">Kapat</button>
     </div>
   </div>

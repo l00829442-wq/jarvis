@@ -163,6 +163,9 @@ def main():
         ws = _retry(lambda: jarvis_agent._web_search({}, "python programlama dili"))
         check("arac: web_search (yerel)", ws.get("ok") and len(ws.get("sonuc") or "") > 20,
               "kaynak=%s" % ws.get("kaynak"))
+        dr = _retry(lambda: jarvis_agent._deep_research({}, "Ankara hakkinda bilgi"))
+        check("arac: deep_research (yerel)", dr.get("ok") and len(dr.get("sonuc") or "") > 200,
+              "kaynak=%s len=%d" % (dr.get("kaynak"), len(dr.get("sonuc") or "")))
     except Exception as e:
         check("arac: yerel testler", False, str(e))
 
@@ -176,6 +179,63 @@ def main():
         check("memory API ekle/listele", after == before + 1, "%d -> %d" % (before, after))
     except Exception as e:
         check("memory API", False, str(e))
+
+    # 6b) rehber / ara / mesaj
+    try:
+        d, tools, dt = chat("Rehberime Test Kişi ekle 0555 111 22 33")
+        check("rehber kaydet", "save_contact" in tools, "tools=%s" % tools)
+
+        d, tools, dt = chat("Test Kişi'yi ara")
+        acts = [(a.get("type"), a.get("url")) for a in (d.get("actions") or [])]
+        check("rehber ara", "call_contact" in tools and any(t == "call" and (u or "").startswith("tel:") for t, u in acts),
+              "actions=%s" % acts)
+
+        d, tools, dt = chat("Test Kişi'ye mesaj at merhaba jarvis")
+        acts = [(a.get("type"), a.get("url")) for a in (d.get("actions") or [])]
+        check("rehber mesaj", "send_sms" in tools and any(t == "sms" and (u or "").startswith("sms:") for t, u in acts),
+              "actions=%s" % acts)
+    except Exception as e:
+        check("rehber", False, str(e))
+
+    # 6c) uygulama acma (deep-link/web) eylemi
+    try:
+        d, tools, dt = chat("instagram aç")
+        acts = [(a.get("type"), a.get("scheme")) for a in (d.get("actions") or [])]
+        check("uygulama acma", "open_app" in tools, "actions=%s" % acts)
+    except Exception as e:
+        check("uygulama acma", False, str(e))
+
+    # 6d) saat dilimi (istemci tz_offset kabul edilmeli)
+    try:
+        s, b, dt = req("/api/chat", {"messages": [{"role": "user", "content": "Saat kaç?"}], "tz_offset": 0})
+        d = json.loads(b)
+        check("tz_offset kabul", bool(d.get("reply")) and "get_datetime" in [t.get("arac") for t in (d.get("tools") or [])],
+              "reply=%s" % (d.get("reply") or "")[:40])
+    except Exception as e:
+        check("tz_offset kabul", False, str(e))
+
+    # 6e) contacts API
+    try:
+        s, b, dt = req("/api/contacts")
+        before = len(json.loads(b).get("contacts", []))
+        uniq = "Api Kisi %d" % int(time.time())
+        s, b, dt = req("/api/contacts", {"action": "add", "name": uniq, "phone": "0555 999 88 77"})
+        s, b, dt = req("/api/contacts")
+        d = json.loads(b)
+        names = [c.get("name") for c in d.get("contacts", [])]
+        check("contacts API ekle/listele", len(names) == before + 1 and uniq in names,
+              "%d -> %d" % (before, len(names)))
+    except Exception as e:
+        check("contacts API", False, str(e))
+
+    # 6f) kendini test et
+    try:
+        s, b, dt = req("/api/selfcheck", timeout=120)
+        d = json.loads(b)
+        check("selfcheck", "checks" in d and len(d["checks"]) >= 6 and dt < 60,
+              "ok=%s %d kontrol %.1fs" % (d.get("ok"), len(d.get("checks", [])), dt))
+    except Exception as e:
+        check("selfcheck", False, str(e))
 
     # 7) ses -> yazi (test WAV)
     wav = None

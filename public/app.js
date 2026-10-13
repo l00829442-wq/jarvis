@@ -95,7 +95,7 @@ function addToolBadges(tools) {
   $("chat").scrollTop = $("chat").scrollHeight;
 }
 
-/* Gelen eylemleri (açılacak linkler) kullanıcının cihazında gerçekleştir */
+/* Gelen eylemleri (açılacak linkler, arama, mesaj, uygulama) cihazda gerçekleştir */
 function addActionLink(url, label) {
   const div = document.createElement("div");
   div.className = "msg ai";
@@ -104,28 +104,83 @@ function addActionLink(url, label) {
   a.target = "_blank";
   a.rel = "noopener";
   a.className = "action-link";
-  a.textContent = "▶ " + (label || "Aç: " + url);
+  a.textContent = label || ("▶ " + url);
   div.appendChild(a);
   $("chat").appendChild(div);
   $("chat").scrollTop = $("chat").scrollHeight;
 }
 
+function isMobileUA() {
+  return /Android|iPhone|iPad|iPod|Mobile|Opera Mini/i.test(navigator.userAgent);
+}
+
+function normalizePhone(p) {
+  let s = (p || "").replace(/[^\d+]/g, "");
+  if (s.startsWith("00")) s = "+" + s.slice(2);
+  else if (s.startsWith("0") && s.length >= 11) s = "+90" + s.slice(1);
+  else if (!s.startsWith("+") && s.length === 10) s = "+90" + s;
+  return s.replace(/^\++/, "+");
+}
+
+function openURL(url, label) {
+  if (!url) return;
+  const local = ["localhost", "127.0.0.1", "::1"].includes(location.hostname);
+  if (local && /^https?:/i.test(url)) {
+    fetch("/api/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    }).catch(() => {});
+    addActionLink(url, label);
+    return;
+  }
+  let ok = false;
+  try { ok = !!window.open(url, "_blank"); } catch (e) { ok = false; }
+  if (!ok) addActionLink(url, label);
+}
+
+/* Telefonda uygulamayı deep-link ile açar; olmazsa web sürümüne düşer */
+function openAppAction(a) {
+  const scheme = a.scheme;
+  const web = a.web;
+  const label = a.label;
+  if (!scheme) { openURL(web, label); return; }
+  const t0 = Date.now();
+  let fell = false;
+  const fallback = () => {
+    if (fell) return;
+    fell = true;
+    if (web) openURL(web, label);
+    else addActionLink(scheme, label);
+  };
+  window.setTimeout(() => { if (!document.hidden && Date.now() - t0 < 2200) fallback(); }, 1500);
+  try {
+    const fr = document.createElement("iframe");
+    fr.style.display = "none";
+    fr.src = scheme;
+    document.body.appendChild(fr);
+    window.setTimeout(() => fr.remove(), 1800);
+  } catch (e) { fallback(); return; }
+  addActionLink(web || scheme, label);
+}
+
 function runActions(actions) {
   if (!actions || !actions.length) return;
-  const local = ["localhost", "127.0.0.1", "::1"].includes(location.hostname);
+  const mobile = isMobileUA();
   actions.forEach((a) => {
-    if (!a || a.type !== "open_url" || !a.url) return;
-    if (local) {
-      fetch("/api/open", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: a.url }),
-      }).catch(() => {});
+    if (!a) return;
+    const type = a.type || (a.url ? "open_url" : "");
+    if (type === "call" || type === "sms") {
+      try { window.location.href = a.url; } catch (e) {}
+      addActionLink(a.url, a.label);
       return;
     }
-    let ok = false;
-    try { ok = !!window.open(a.url, "_blank"); } catch (e) { ok = false; }
-    if (!ok) addActionLink(a.url);
+    if (type === "app") {
+      if (mobile) openAppAction(a);
+      else openURL(a.web || a.scheme, a.label);
+      return;
+    }
+    if (type === "open_url" && a.url) { openURL(a.url, a.label); return; }
   });
 }
 
@@ -687,6 +742,7 @@ async function handleUserInput(text) {
   try {
     const body = { messages: state.messages };
     if (image) body.image = image;
+    try { body.tz_offset = -new Date().getTimezoneOffset(); } catch (e) {}
     const r = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -739,6 +795,82 @@ function loadImageFile(file) {
 async function openMemory() {
   $("memoryModal").classList.add("open");
   await renderMemory();
+  renderContacts();
+}
+
+async function renderContacts() {
+  const list = $("contactList");
+  if (!list) return;
+  list.innerHTML = "<p class='muted'>Yükleniyor...</p>";
+  try {
+    const r = await fetch("/api/contacts");
+    const d = await r.json();
+    const cs = d.contacts || [];
+    if (!cs.length) { list.innerHTML = "<p class='muted'>Rehber boş.</p>"; return; }
+    list.innerHTML = "";
+    cs.forEach((c) => {
+      const row = document.createElement("div");
+      row.className = "mem-row";
+      const span = document.createElement("span");
+      span.textContent = c.name + " · " + c.phone;
+      const call = document.createElement("button");
+      call.className = "chip-x";
+      call.title = "Ara";
+      call.textContent = "📞";
+      call.addEventListener("click", () => openURL("tel:" + normalizePhone(c.phone)));
+      const msg = document.createElement("button");
+      msg.className = "chip-x";
+      msg.title = "Mesaj";
+      msg.textContent = "💬";
+      msg.addEventListener("click", () => openURL("sms:" + normalizePhone(c.phone)));
+      const del = document.createElement("button");
+      del.className = "chip-x";
+      del.textContent = "🗑";
+      del.addEventListener("click", async () => {
+        await fetch("/api/contacts", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "forget", id: c.id }),
+        });
+        renderContacts();
+      });
+      row.appendChild(span);
+      row.appendChild(call);
+      row.appendChild(msg);
+      row.appendChild(del);
+      list.appendChild(row);
+    });
+  } catch (e) {
+    list.innerHTML = "<p class='muted'>Rehber yüklenemedi.</p>";
+  }
+}
+
+async function contactAdd() {
+  const name = $("contactName").value.trim();
+  const phone = $("contactPhone").value.trim();
+  if (!name || !phone) { toast("İsim ve telefon gerekli"); return; }
+  $("contactName").value = "";
+  $("contactPhone").value = "";
+  await fetch("/api/contacts", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "add", name, phone }),
+  });
+  renderContacts();
+}
+
+/* ---------------- Kendini test ---------------- */
+async function runSelfcheck() {
+  addMessage("user", "🩺 Kendini test et");
+  const out = addMessage("bot", "Test ediliyor...");
+  try {
+    const r = await fetch("/api/selfcheck");
+    const d = await r.json();
+    const lines = (d.checks || []).map((c) =>
+      (c.ok ? "✅ " : "❌ ") + c.ad + (c.detay ? " — " + c.detay : ""));
+    out.textContent = (d.ok ? "🟢 Her şey çalışıyor" : "🟠 Bazı sorunlar var") +
+      " (v" + d.version + ")\n" + lines.join("\n");
+  } catch (e) {
+    out.textContent = "❌ Test yapılamadı: " + e.message;
+  }
 }
 
 async function renderMemory() {
@@ -908,6 +1040,7 @@ function bindEvents() {
 
   $("notifyBtn").addEventListener("click", askNotify);
   $("memoryBtn").addEventListener("click", openMemory);
+  $("selfcheckBtn").addEventListener("click", runSelfcheck);
   $("closeMemory").addEventListener("click", () => $("memoryModal").classList.remove("open"));
   $("memAddBtn").addEventListener("click", memoryAdd);
   $("memInput").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); memoryAdd(); } });
@@ -915,6 +1048,8 @@ function bindEvents() {
     await fetch("/api/memory", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "clear" }) });
     renderMemory();
   });
+  $("contactAddBtn").addEventListener("click", contactAdd);
+  $("contactPhone").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); contactAdd(); } });
 
   // Görsel ekleme
   $("imgBtn").addEventListener("click", () => $("imgInput").click());

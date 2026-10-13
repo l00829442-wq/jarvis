@@ -20,6 +20,7 @@ import urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import jarvis_agent
+import jarvis_tools as tools
 from jarvis_memory import MemoryStore
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -37,7 +38,7 @@ def get_memory():
         _MEMORY = MemoryStore(MEMORY_PATH)
     return _MEMORY
 
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"
 
 DEFAULT_CONFIG = {
     "provider": "gemini",          # gemini | groq | deepseek | openai | openrouter | offline
@@ -339,17 +340,78 @@ def call_openai_compatible(cfg, messages, spec):
 
 
 def _actions_from_tools(tools_used):
-    """Arac sonuclarindan istemcide (kullanicinin cihazinda) acilacak URL'leri cikarir."""
+    """Arac sonuclarindan istemcide (kullanicinin cihazinda) yapilacak eylemleri cikarir."""
     actions = []
     seen = set()
+
+    def add(a):
+        key = (a.get("type"), a.get("url") or a.get("scheme"))
+        if key in seen:
+            return
+        seen.add(key)
+        actions.append(a)
+
     for t in tools_used or []:
         res = (t or {}).get("sonuc") or {}
-        if isinstance(res, dict):
-            u = res.get("url")
-            if u and u not in seen:
-                seen.add(u)
-                actions.append({"type": "open_url", "url": u})
+        if not isinstance(res, dict):
+            continue
+        if res.get("call_url"):
+            add({"type": "call", "url": res["call_url"],
+                 "label": "📞 " + (res.get("contact") or "Ara") + " ara"})
+        if res.get("sms_url"):
+            add({"type": "sms", "url": res["sms_url"],
+                 "label": "💬 " + (res.get("contact") or "") + " mesaj"})
+        if res.get("scheme") and res.get("app"):
+            add({"type": "app", "scheme": res["scheme"], "web": res.get("web"),
+                 "label": "▶ Aç: " + res["app"].title()})
+        u = res.get("url")
+        # Sunucu zaten actiysa (Windows) istemcide tekrar acma
+        if u and not res.get("yapildi") and not (res.get("scheme") and res.get("app")):
+            add({"type": "open_url", "url": u, "label": res.get("label")})
     return actions
+
+
+def run_selfcheck():
+    """Jarvis'in kendi kendini test etmesi: saglayici + araclar + veri."""
+    cfg = load_config()
+    provider = (cfg.get("provider") or "offline").lower()
+    checks = []
+
+    def add(ad, ok, detay=""):
+        checks.append({"ad": ad, "ok": bool(ok), "detay": str(detay)[:140]})
+
+    add("Saglayici", bool(resolve_key(cfg, provider)),
+        "%s / %s / anahtar:%s" % (provider, resolve_model(cfg, provider),
+                                  "var" if resolve_key(cfg, provider) else "YOK"))
+    try:
+        d = tools.get_datetime()
+        add("Saat/tarih", bool(d.get("saat")),
+            "%s %s (%s)" % (d.get("tarih"), d.get("saat"), d.get("saat_dilimi")))
+    except Exception as exc:  # noqa: BLE001
+        add("Saat/tarih", False, exc)
+    try:
+        w = tools.weather("Ankara")
+        add("Hava durumu", w.get("ok"), w.get("kaynak") or w.get("hata"))
+    except Exception as exc:  # noqa: BLE001
+        add("Hava durumu", False, exc)
+    try:
+        r = tools.exchange_rate("USD")
+        add("Doviz kuru", r.get("ok"), r.get("kur") or r.get("hata"))
+    except Exception as exc:  # noqa: BLE001
+        add("Doviz kuru", False, exc)
+    try:
+        ws = jarvis_agent._web_search(cfg, "python programlama dili")
+        add("Web arama", ws.get("ok"), ws.get("kaynak") or ws.get("hata"))
+    except Exception as exc:  # noqa: BLE001
+        add("Web arama", False, exc)
+    try:
+        mem = get_memory()
+        add("Hafiza", True, "%d kayit" % mem.count())
+        add("Rehber", True, "%d kisi" % mem.contacts.count())
+    except Exception as exc:  # noqa: BLE001
+        add("Hafiza/Rehber", False, exc)
+
+    return {"ok": all(c["ok"] for c in checks), "version": APP_VERSION, "checks": checks}
 
 
 def ask_ai(cfg, messages):
@@ -412,6 +474,7 @@ class JarvisHandler(BaseHTTPRequestHandler):
                 "model": resolve_model(cfg, provider),
                 "tools": True,
                 "memories": get_memory().count(),
+                "contacts": get_memory().contacts.count(),
             })
             return
         if self.path.startswith("/api/version"):
@@ -458,6 +521,18 @@ class JarvisHandler(BaseHTTPRequestHandler):
                 ]
             })
             return
+        if self.path.startswith("/api/contacts"):
+            mem = get_memory()
+            self._send_json({
+                "contacts": [
+                    {"id": r[0], "name": r[1], "phone": r[2]}
+                    for r in mem.contacts.all()
+                ]
+            })
+            return
+        if self.path.startswith("/api/selfcheck"):
+            self._send_json(run_selfcheck())
+            return
         self._serve_static()
 
     def do_POST(self):  # noqa: N802
@@ -481,6 +556,12 @@ class JarvisHandler(BaseHTTPRequestHandler):
                         m["image"] = img
                         break
             cfg = load_config()
+            tz = req.get("tz_offset")
+            if tz is not None:
+                try:
+                    tools.set_timezone_offset(tz)
+                except Exception:  # noqa: BLE001
+                    pass
             try:
                 reply, tools_used = ask_ai(cfg, messages)
                 self._send_json({
@@ -598,6 +679,31 @@ class JarvisHandler(BaseHTTPRequestHandler):
             elif action == "clear":
                 mem.clear()
                 self._send_json({"ok": True})
+            else:
+                self._send_json({"error": "Bilinmeyen islem"}, 400)
+            return
+        if self.path.startswith("/api/contacts"):
+            length = int(self.headers.get("Content-Length", "0"))
+            raw = self.rfile.read(length) if length else b"{}"
+            try:
+                req = json.loads(raw.decode("utf-8"))
+            except Exception:  # noqa: BLE001
+                self._send_json({"error": "Gecersiz istek"}, 400)
+                return
+            contacts = get_memory().contacts
+            action = (req.get("action") or "").lower()
+            if action == "add":
+                cid = contacts.save(req.get("name", ""), req.get("phone", ""))
+                if cid:
+                    self._send_json({"ok": True, "id": cid})
+                else:
+                    self._send_json({"error": "Isim ve telefon gerekli"}, 400)
+            elif action == "forget":
+                try:
+                    contacts.forget(int(req.get("id")))
+                    self._send_json({"ok": True})
+                except Exception:  # noqa: BLE001
+                    self._send_json({"error": "Gecersiz id"}, 400)
             else:
                 self._send_json({"error": "Bilinmeyen islem"}, 400)
             return

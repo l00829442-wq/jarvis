@@ -1,5 +1,5 @@
 // Jarvis service worker - uygulamayı telefona "kurulabilir" yapar
-const CACHE = "jarvis-v8";
+const CACHE = "jarvis-v9";
 const ASSETS = [
   "./",
   "./index.html",
