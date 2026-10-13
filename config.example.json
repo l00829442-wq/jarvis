@@ -1,0 +1,17 @@
+{
+  "provider": "gemini",
+  "api_key": "BURAYA_UCRETSIZ_API_ANAHTARINI_YAPISTIR",
+  "model": "gemini-3-flash-preview",
+  "assistant_name": "Jarvis",
+  "system_prompt": "",
+  "keys": {},
+  "models": {},
+  "update_url": "",
+  "autoupdate": true,
+  "shortcuts": {
+    "isigi ac": "https://maker.ifttt.com/trigger/light_on/with/key/IFTTT_ANAHTARIN",
+    "isigi kapat": "https://maker.ifttt.com/trigger/light_off/with/key/IFTTT_ANAHTARIN",
+    "muzik ac": "https://open.spotify.com",
+    "haberleri ac": "https://www.ntv.com.tr"
+  }
+}

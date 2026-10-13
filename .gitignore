@@ -1,0 +1,18 @@
+# API anahtarınızı ve kişisel verileri repoya koymayın
+config.json
+data/
+__pycache__/
+*.pyc
+.env
+
+# Hafıza veritabanı (kişisel veriler)
+jarvis_memory.db
+*.db
+
+# Derleme çıktıları
+build/
+build_*/
+dist/
+dist_*/
+*.spec
+*.log

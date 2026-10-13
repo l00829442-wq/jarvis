@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#04121a" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Jarvis - Yapay Zeka Asistanı</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="dot" id="statusDot"></span>
+        <span class="brand-name" id="assistantName">JARVIS</span>
+      </div>
+      <div class="topbar-actions">
+        <button class="icon-btn" id="memoryBtn" title="Hafıza">🧠</button>
+        <button class="icon-btn" id="wakeBtn" title="Uyandırma modu (Hey Jarvis)">👂</button>
+        <button class="icon-btn" id="speakToggle" title="Sesli cevap">🔊</button>
+        <button class="icon-btn" id="notifyBtn" title="Bildirimlere izin ver">🔔</button>
+        <button class="icon-btn" id="settingsBtn" title="Ayarlar">⚙️</button>
+      </div>
+    </header>
+
+    <main class="stage">
+      <div class="orb" id="orb">
+        <div class="ring r1"></div>
+        <div class="ring r2"></div>
+        <div class="ring r3"></div>
+        <div class="core"></div>
+      </div>
+      <p class="state-text" id="stateText">Bağlanıyor...</p>
+    </main>
+
+    <section class="chat" id="chat"></section>
+
+    <div class="quick-cmds" id="quickCmds">
+      <button data-cmd="Saat kaç?">🕐 Saat</button>
+      <button data-cmd="Bugün günlerden ne?">📅 Tarih</button>
+      <button data-cmd="YouTube'u aç">▶️ YouTube</button>
+      <button data-cmd="Notlarımı göster">📝 Notlar</button>
+      <button data-cmd="Bana bir espri yap">😄 Espri</button>
+      <button data-cmd="Hava durumu nasıl?">🌤️ Hava</button>
+    </div>
+
+    <form class="composer" id="composer">
+      <button type="button" class="mic-btn" id="micBtn" title="Konuş">🎤</button>
+      <button type="button" class="img-btn" id="imgBtn" title="Görsel ekle">🖼️</button>
+      <input type="file" id="imgInput" accept="image/*" hidden />
+      <input type="text" id="input" placeholder="Bir şey yaz ya da mikrofona bas..." autocomplete="off" />
+      <button type="submit" class="send-btn" id="sendBtn" title="Gönder">➤</button>
+    </form>
+    <div class="img-preview" id="imgPreview" hidden>
+      <img id="imgThumb" alt="görsel" />
+      <span id="imgName" class="muted"></span>
+      <button type="button" id="imgClear" class="chip-x">✕</button>
+    </div>
+  </div>
+
+  <div class="modal" id="settingsModal">
+    <div class="modal-card">
+      <h2>Ayarlar</h2>
+      <label class="row">
+        <span>Yapay zeka sağlayıcı</span>
+        <select id="optProvider"></select>
+      </label>
+      <label class="row">
+        <span>Model</span>
+        <input type="text" id="optModel" placeholder="model adı" />
+      </label>
+      <label class="row">
+        <span>API anahtarı</span>
+        <input type="password" id="optApiKey" placeholder="bu sağlayıcı için" />
+      </label>
+      <div class="row">
+        <span>Anahtar / kayıt</span>
+        <a id="keyLink" class="muted" href="#" target="_blank" rel="noopener">ücretsiz anahtar al</a>
+      </div>
+      <button class="wide-btn" id="optSaveBtn">AI ayarlarını kaydet</button>
+      <label class="row">
+        <span>Sesli cevap</span>
+        <input type="checkbox" id="optSpeak" />
+      </label>
+      <label class="row">
+        <span>Uyandırma modu (sürekli dinle)</span>
+        <input type="checkbox" id="optWake" />
+      </label>
+      <label class="row">
+        <span>Uyandırma kelimesi</span>
+        <input type="text" id="optWakeWord" placeholder="jarvis" />
+      </label>
+      <label class="row">
+        <span>Asistan adı</span>
+        <input type="text" id="optName" />
+      </label>
+      <div class="row">
+        <span>Bağlantı</span>
+        <span id="connInfo" class="muted">-</span>
+      </div>
+      <div class="row">
+        <span>Sürüm</span>
+        <span id="versionInfo" class="muted">-</span>
+      </div>
+      <button class="wide-btn danger" id="clearBtn">Sohbeti temizle</button>
+      <button class="wide-btn" id="closeSettings">Kapat</button>
+    </div>
+  </div>
+
+  <div class="modal" id="memoryModal">
+    <div class="modal-card">
+      <h2>🧠 Hafıza</h2>
+      <p class="muted">Jarvis'in sizinle ilgili hatırladıkları. "Hatırla: ..." diyerek ekleyebilir, silebilirsiniz.</p>
+      <div class="memory-add">
+        <input type="text" id="memInput" placeholder="Yeni bilgi ekle..." />
+        <button type="button" class="wide-btn" id="memAddBtn">Ekle</button>
+      </div>
+      <div id="memList" class="mem-list"></div>
+      <button class="wide-btn danger" id="memClearBtn">Tüm hafızayı temizle</button>
+      <button class="wide-btn" id="closeMemory">Kapat</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

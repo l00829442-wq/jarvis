@@ -1,0 +1,3 @@
+# Ek paket GEREKMEZ. Uygulama yalnizca Python standart kutuphanesini kullanir.
+# Bu dosya, bazi bulut platformlarinin (Render/Heroku) Python projesi
+# tanimasi icin burada duruyor.
