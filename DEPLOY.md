@@ -12,31 +12,29 @@ Ayrıca **HTTPS** sayesinde telefonda **mikrofon/sesle dinleme de çalışır**
 
 ## Yol A - Render (en kolay, ücretsiz)
 
-### 1) Kodu GitHub'a koy
-Git kurulu değilse: https://git-scm.com/download/win adresinden kur.
-Sonra bu klasörde:
+### 1) Kodu GitHub'a koy (tek tık)
+Bu klasördeki **`yayinla.cmd`** dosyasına **çift tikla**. Script:
+- yerel commit'i hazırlar,
+- `gh` kuruluysa GitHub girişini açar (tarayıcıda "Authorize" tıkla) ve repoyu
+  **otomatik oluşturup gönderir**,
+- `gh` yoksa GitHub'da boş bir repo açmanı ister, adresini yapıştırınca gönderir.
 
+> `gh` (GitHub CLI) bu makineye kuruldu. Sadece ilk seferde tarayıcıda izin vermen
+> yeterli; sonrası otomatik.
+
+Elle yapmak istersen:
 ```powershell
-git init
-git add .
-git commit -m "Jarvis"
-```
-
-GitHub'da yeni bir **boş** repo aç (örnek: `jarvis`), sonra:
-
-```powershell
-git branch -M main
+git init; git add .; git commit -m "Jarvis"; git branch -M main
 git remote add origin https://github.com/KULLANICI_ADIN/jarvis.git
 git push -u origin main
 ```
 
-> Git kullanmak istemezsen **GitHub Desktop** uygulaması ile de bu klasörü
-> repoya yükleyebilirsin.
-
 ### 2) Render'da yayınla
 1. https://render.com → ücretsiz kaydol (GitHub ile giriş yap)
-2. **New → Web Service** → GitHub reponu seç
-3. Ayarlar:
+2. **New → Blueprint** (önerilen) → reponu seç. Repodaki **`render.yaml`** tüm
+   ayarları (runtime, build/start komutu, free plan) otomatik doldurur; sadece
+   `JARVIS_API_KEY` sorulur. — **veya** **New → Web Service** → reponu seç.
+3. Ayarlar (Web Service seçtiysen):
    - **Runtime:** Python 3
    - **Build Command:** `pip install -r requirements.txt`
    - **Start Command:** `python server.py`
