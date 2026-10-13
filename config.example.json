@@ -1,7 +1,7 @@
 {
   "provider": "gemini",
   "api_key": "BURAYA_UCRETSIZ_API_ANAHTARINI_YAPISTIR",
-  "model": "gemini-3-flash-preview",
+  "model": "gemini-3.5-flash-lite",
   "assistant_name": "Jarvis",
   "system_prompt": "",
   "keys": {},

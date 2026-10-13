@@ -37,12 +37,12 @@ def get_memory():
         _MEMORY = MemoryStore(MEMORY_PATH)
     return _MEMORY
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 
 DEFAULT_CONFIG = {
     "provider": "gemini",          # gemini | groq | deepseek | openai | openrouter | offline
     "api_key": "",
-    "model": "gemini-3-flash-preview",
+    "model": "gemini-3.5-flash-lite",
     "keys": {},                    # her saglayici icin ayri anahtar (opsiyonel)
     "models": {},                  # her saglayici icin ayri model (opsiyonel)
     "assistant_name": "Jarvis",
@@ -61,7 +61,7 @@ PROVIDERS = {
         "label": "Google Gemini",
         "kind": "gemini",
         "url": "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-        "default_model": "gemini-3-flash-preview",
+        "default_model": "gemini-3.5-flash-lite",
         "key_url": "https://aistudio.google.com/app/apikey",
         "free": True,
         "vision": True,
@@ -192,12 +192,13 @@ def offline_brain(messages):
     )
 
 
-FAST_MODEL = "gemini-3-flash-preview"
+FAST_MODEL = "gemini-3.5-flash-lite"
 GEMINI_FALLBACK_MODELS = [
-    "gemini-3-flash-preview",
-    "gemini-flash-latest",
-    "gemini-3.8-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-3.6-flash",
     "gemini-flash-lite-latest",
+    "gemini-3.8-flash",
 ]
 
 
@@ -294,7 +295,7 @@ def call_gemini_transcribe(cfg, audio_b64, mime):
     key = cfg.get("api_key") or ""
     if not key:
         raise RuntimeError("API anahtari yok")
-    preferred = cfg.get("transcribe_model") or "gemini-3-flash-preview"
+    preferred = cfg.get("transcribe_model") or "gemini-3.5-flash-lite"
     body = {
         "contents": [{
             "parts": [
@@ -335,6 +336,20 @@ def call_openai_compatible(cfg, messages, spec):
         raise RuntimeError("API anahtari yok")
     model = cfg.get("model") or spec.get("default_model")
     return jarvis_agent.ask_openai(cfg, messages, get_memory(), spec["url"], model, key)
+
+
+def _actions_from_tools(tools_used):
+    """Arac sonuclarindan istemcide (kullanicinin cihazinda) acilacak URL'leri cikarir."""
+    actions = []
+    seen = set()
+    for t in tools_used or []:
+        res = (t or {}).get("sonuc") or {}
+        if isinstance(res, dict):
+            u = res.get("url")
+            if u and u not in seen:
+                seen.add(u)
+                actions.append({"type": "open_url", "url": u})
+    return actions
 
 
 def ask_ai(cfg, messages):
@@ -472,6 +487,7 @@ class JarvisHandler(BaseHTTPRequestHandler):
                     "reply": reply,
                     "provider": cfg.get("provider"),
                     "tools": tools_used,
+                    "actions": _actions_from_tools(tools_used),
                 })
             except urllib.error.HTTPError as exc:
                 detail = exc.read().decode("utf-8", "ignore")
@@ -483,6 +499,20 @@ class JarvisHandler(BaseHTTPRequestHandler):
             except Exception as exc:  # noqa: BLE001
                 print("[!] Hata:", exc)
                 self._send_json({"error": str(exc)}, 500)
+            return
+        if self.path.startswith("/api/open"):
+            length = int(self.headers.get("Content-Length", "0"))
+            raw = self.rfile.read(length) if length else b"{}"
+            try:
+                req = json.loads(raw.decode("utf-8"))
+            except Exception:  # noqa: BLE001
+                self._send_json({"error": "Gecersiz istek"}, 400)
+                return
+            url = (req.get("url") or "").strip()
+            if not url:
+                self._send_json({"error": "url yok"}, 400)
+                return
+            self._send_json(tools.open_url(url))
             return
         if self.path.startswith("/api/transcribe"):
             length = int(self.headers.get("Content-Length", "0"))

@@ -83,6 +83,7 @@ const TOOL_LABELS = {
   set_volume: "Ses", take_screenshot: "Ekran görüntüsü", lock_screen: "Kilit",
   remember: "Hafıza", recall: "Hafıza", write_file: "Dosya yaz", read_file: "Dosya oku",
   list_files: "Dosya listesi", web_search: "Web arama", open_url: "Web aç",
+  get_weather: "Hava durumu", play_youtube: "YouTube",
 };
 
 function addToolBadges(tools) {
@@ -92,6 +93,40 @@ function addToolBadges(tools) {
   div.textContent = "🔧 " + names.join(" · ");
   $("chat").appendChild(div);
   $("chat").scrollTop = $("chat").scrollHeight;
+}
+
+/* Gelen eylemleri (açılacak linkler) kullanıcının cihazında gerçekleştir */
+function addActionLink(url, label) {
+  const div = document.createElement("div");
+  div.className = "msg ai";
+  const a = document.createElement("a");
+  a.href = url;
+  a.target = "_blank";
+  a.rel = "noopener";
+  a.className = "action-link";
+  a.textContent = "▶ " + (label || "Aç: " + url);
+  div.appendChild(a);
+  $("chat").appendChild(div);
+  $("chat").scrollTop = $("chat").scrollHeight;
+}
+
+function runActions(actions) {
+  if (!actions || !actions.length) return;
+  const local = ["localhost", "127.0.0.1", "::1"].includes(location.hostname);
+  actions.forEach((a) => {
+    if (!a || a.type !== "open_url" || !a.url) return;
+    if (local) {
+      fetch("/api/open", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: a.url }),
+      }).catch(() => {});
+      return;
+    }
+    let ok = false;
+    try { ok = !!window.open(a.url, "_blank"); } catch (e) { ok = false; }
+    if (!ok) addActionLink(a.url);
+  });
 }
 
 function addTyping() {
@@ -552,16 +587,33 @@ function handleSmartCommand(raw) {
     return true;
   }
 
-  // --- YouTube ---
-  if ((m = t.match(/youtube'?[dt]a\s+(.+?)\s*(?:ara|bul|çal|aç|göster)?$/))) {
-    const q = m[1].replace(/\s*(ara|bul|çal|aç|göster)\s*$/, "").trim();
-    openUrl("https://www.youtube.com/results?search_query=" + encodeURIComponent(q));
-    replyShort(`YouTube'da "${q}" arıyorum efendim.`);
-    return true;
+  // --- YouTube / müzik (cihazda açılır) ---
+  if ((m = t.match(/youtube'?[dt][ae]n?\s+(.+)$/)) || (m = t.match(/youtube\s+(.+)$/))) {
+    let q = m[1].replace(/\s*(ara|bul|çal|aç|göster|dinle|oynat)\s*$/, "").trim();
+    q = q.replace(/^(da|de|dan|den)\s+/, "").trim();
+    if (q) {
+      openUrl("https://www.youtube.com/results?search_query=" + encodeURIComponent(q));
+      replyShort(`YouTube'da "${q}" arıyorum efendim.`);
+      return true;
+    }
   }
-  if (/youtube'?u?\s*(aç|başlat)/.test(t)) {
+  if ((/\byoutube\b/.test(t) && /(aç|başlat|gir)/.test(t)) || /youtube'?u?\s*(aç|başlat)/.test(t)) {
     openUrl(SITES.youtube);
     replyShort("YouTube açılıyor efendim.");
+    return true;
+  }
+  // Genel "<şarkı/sanatçı> çal / oynat / dinle"
+  if ((m = t.match(/^(.+?)\s*(?:çal|çalsana|oynat|oynatır mısın|dinle)$/))) {
+    let q = m[1].replace(/^(bana|bir|şu|şunu|bu)\s+/, "").trim();
+    if (q && !/^(ses|müzik sesi)/.test(q)) {
+      openUrl("https://www.youtube.com/results?search_query=" + encodeURIComponent(q));
+      replyShort(`YouTube'da "${q}" arıyorum efendim.`);
+      return true;
+    }
+  }
+  if (/^müzik\s*(aç|çal|oynat|başlat)/.test(t) || /(müzik|muzik)\s*(aç|çal|dinle)/.test(t)) {
+    openUrl(SITES.youtube);
+    replyShort("Müzik için YouTube açılıyor efendim.");
     return true;
   }
 
@@ -646,6 +698,7 @@ async function handleUserInput(text) {
     state.messages.push({ role: "assistant", content: reply });
     addMessage("assistant", reply);
     if (d.tools && d.tools.length) addToolBadges(d.tools);
+    if (d.actions && d.actions.length) runActions(d.actions);
     LS.save();
     speak(reply);
   } catch (e) {

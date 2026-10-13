@@ -9,6 +9,6 @@ services:
       - key: JARVIS_PROVIDER
         value: gemini
       - key: JARVIS_MODEL
-        value: gemini-3-flash-preview
+        value: gemini-3.5-flash-lite
       - key: JARVIS_API_KEY
         sync: false   # sır olarak Render panelinden girin

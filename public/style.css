@@ -380,6 +380,17 @@ html, body {
   opacity: .85;
 }
 
+.action-link {
+  display: inline-block;
+  background: linear-gradient(135deg, var(--accent, #2fd6ff), var(--accent2, #5b8cff));
+  color: #04121a;
+  font-weight: 600;
+  text-decoration: none;
+  padding: 10px 16px;
+  border-radius: 12px;
+  font-size: 14px;
+}
+
 /* ---------- Hafıza ---------- */
 .memory-add { display: flex; gap: 8px; margin-bottom: 12px; }
 .memory-add input {

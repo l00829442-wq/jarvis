@@ -11,18 +11,20 @@ sohbete duser; boylece sistem her kosulda calisir.
 """
 
 import json
+import re
 import urllib.request
 import urllib.error
 
 import jarvis_tools as tools
 
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-FAST_MODEL = "gemini-3-flash-preview"
+FAST_MODEL = "gemini-3.5-flash-lite"
 FALLBACK_MODELS = [
-    "gemini-3-flash-preview",
-    "gemini-flash-latest",
-    "gemini-3.8-flash",
+    "gemini-3.5-flash-lite",   # 500 istek/gun (ucretsiz)
+    "gemini-3.1-flash-lite",   # 500 istek/gun
+    "gemini-3.6-flash",        # daha yetenekli (20/gun) - lite tukenirse
     "gemini-flash-lite-latest",
+    "gemini-3.8-flash",
 ]
 
 MAX_STEPS = 6
@@ -110,6 +112,24 @@ FUNCTION_DECLARATIONS = [
         "description": "Guncel bilgi, haber, hava durumu, mac sonucu, fiyat gibi internete bakilmasi gereken sorular icin web'de arar.",
         "parameters": {"type": "OBJECT", "properties": {"query": {"type": "STRING"}}, "required": ["query"]},
     },
+    {
+        "name": "get_weather",
+        "description": "Bir sehir icin guncel hava durumunu ve 3 gunluk tahmini verir.",
+        "parameters": {"type": "OBJECT", "properties": {"city": {"type": "STRING", "description": "Sehir adi, orn. 'Istanbul'"}}, "required": ["city"]},
+    },
+    {
+        "name": "play_youtube",
+        "description": "YouTube'da bir sarki/muzik/video acar. Kullanici sarki, muzik veya video dinlemek/acmak istediginde kullan.",
+        "parameters": {"type": "OBJECT", "properties": {"query": {"type": "STRING", "description": "Aranacak sarki, sanatci veya video adi. Bos birakilirsa YouTube ana sayfasi acilir."}}, "required": ["query"]},
+    },
+    {
+        "name": "get_exchange_rate",
+        "description": "Doviz kuru verir (dolar, euro, sterlin vb. karsiligi TL). Kullanici kur/fiyat sordugunda kullan.",
+        "parameters": {"type": "OBJECT", "properties": {
+            "base": {"type": "STRING", "description": "Kaynak doviz kodu, orn. 'USD', 'EUR'"},
+            "to": {"type": "STRING", "description": "Hedef doviz kodu, varsayilan 'TRY'"}},
+            "required": ["base"]},
+    },
 ]
 
 
@@ -153,7 +173,90 @@ def _generate(cfg, body):
     raise last
 
 
+_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+       "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+
+
+def _ddg_search(query, limit=5, timeout=20):
+    """DuckDuckGo (lite, anahtarsiz) ile web arama sonuclari."""
+    import html as _html
+    import urllib.parse as _up
+    url = "https://lite.duckduckgo.com/lite/?q=" + _up.quote(query or "")
+    req = urllib.request.Request(url, headers={"User-Agent": _UA})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        page = resp.read().decode("utf-8", "ignore")
+    items = []
+    for m in re.finditer(r"<a[^>]*class=['\"]result-link['\"][^>]*>(.*?)</a>", page, re.S):
+        text = _html.unescape(re.sub(r"<[^>]+>", "", m.group(1))).strip()
+        href = ""
+        hm = re.search(r"href=['\"]([^'\"]+)['\"]", m.group(0))
+        if hm:
+            href = hm.group(1)
+        if "uddg=" in href:
+            href = _up.unquote(href.split("uddg=", 1)[1].split("&", 1)[0])
+        if href.startswith("//"):
+            href = "https:" + href
+        if text:
+            items.append({"title": text, "url": href, "snippet": ""})
+    snips = [_html.unescape(re.sub(r"<[^>]+>", "", m.group(1))).strip()
+             for m in re.finditer(r"<td[^>]*class=['\"]result-snippet['\"][^>]*>(.*?)</td>", page, re.S)]
+    for i, s in enumerate(snips):
+        if i < len(items):
+            items[i]["snippet"] = s
+    return items[:limit]
+
+
+def _wiki_search(query, limit=3, timeout=20):
+    """Wikipedia (anahtarsiz) ozet arama."""
+    import urllib.parse as _up
+    url = ("https://tr.wikipedia.org/w/api.php?action=query&list=search&format=json&srprop=snippet&srlimit=%d&srsearch=" % limit
+           + _up.quote(query or ""))
+    req = urllib.request.Request(url, headers={"User-Agent": _UA})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    out = []
+    for s in (data.get("query", {}).get("search") or []):
+        snip = re.sub(r"<[^>]+>", "", s.get("snippet", ""))
+        out.append({"title": s.get("title", ""), "snippet": snip.strip()})
+    return out
+
+
 def _web_search(cfg, query):
+    """Guncel bilgi icin web'de arar: anahtarsiz DDG + Wikipedia; son care model
+    'grounding'. Sonucu araci cagiran modele metin olarak dondurur."""
+    query = (query or "").strip()
+    if not query:
+        return {"ok": False, "hata": "Sorgu bos"}
+    # 1) Anahtarsiz arama (kota harcamaz)
+    try:
+        items = _ddg_search(query)
+        if items:
+            lines = ["Web sonuclari (%s):" % query]
+            for it in items:
+                line = "- " + it["title"]
+                if it.get("snippet"):
+                    line += ": " + it["snippet"]
+                if it.get("url"):
+                    line += " [%s]" % it["url"]
+                lines.append(line)
+            return {"ok": True, "kaynak": "duckduckgo", "sonuc": "\n".join(lines)}
+    except Exception:  # noqa: BLE001
+        pass
+    # 2) Wikipedia
+    try:
+        wikis = _wiki_search(query)
+        if wikis:
+            lines = ["Wikipedia sonuclari (%s):" % query]
+            for w in wikis:
+                lines.append("- %s: %s" % (w["title"], w["snippet"]))
+            return {"ok": True, "kaynak": "wikipedia", "sonuc": "\n".join(lines)}
+    except Exception:  # noqa: BLE001
+        pass
+    # 3) Model grounding (varsa)
+    return _web_search_grounding(cfg, query)
+
+
+def _web_search_grounding(cfg, query):
     body = {
         "contents": [{"role": "user", "parts": [{"text":
             "Su konuda internette guncel bilgi ara ve Turkce, kisa ve net bir "
@@ -165,7 +268,6 @@ def _web_search(cfg, query):
         parts = payload["candidates"][0]["content"].get("parts", [])
         return {"ok": True, "sonuc": "".join(p.get("text", "") for p in parts).strip()}
     except urllib.error.HTTPError as exc:
-        # Bazi modeller yeni grounding adini desteklemeyebilir; eski adi dene
         if exc.code in (400,):
             try:
                 body["tools"] = [{"google_search_retrieval": {}}]
@@ -204,6 +306,19 @@ def execute_tool(name, args, memory, cfg):
             return tools.list_files()
         if name == "web_search":
             return _web_search(cfg, args.get("query"))
+        if name == "get_weather":
+            reply, w = tools.weather_reply(args.get("city") or "Istanbul")
+            if w.get("ok"):
+                w["ozet"] = reply
+            return w
+        if name == "play_youtube":
+            url = tools.youtube_url(args.get("query"))
+            return {"ok": True, "acilan": url, "url": url}
+        if name == "get_exchange_rate":
+            reply, r = tools.exchange_reply(args.get("base") or "USD", args.get("to") or "TRY")
+            if r.get("ok"):
+                r["ozet"] = reply
+            return r
         if name == "remember":
             text = (args.get("text") or "").strip()
             if memory and text:
@@ -257,7 +372,7 @@ def _now():
 def fast_path(text, memory):
     """Yaygin, net komutlari LLM'e gitmeden aninda calistirir.
     (cevap, araclar) dondurur; eslesme yoksa None."""
-    t = (text or "").strip().lower()
+    t = _tr_lower((text or "").strip())
     if not t:
         return None
     used = []
@@ -307,10 +422,43 @@ def fast_path(text, memory):
             lvl = int(m.group(2))
             return done("set_volume", tools.volume("ayarla", lvl), "Ses seviyesini ~%%%d yaptim efendim." % lvl)
 
+    # --- Hava durumu (anahtarsiz, LLM'e gitmeden) ---
+    if any(k in t for k in ("hava durum", "hava nasil", "hava nasıl", "hava kac",
+                            "hava kaç", "hava sicaklik", "hava sıcaklık", "hava tahmin",
+                            "yagmur var", "yağmur var", "kar var mı", "kar var mi")):
+        city = _city_from_text(text)
+        reply, w = tools.weather_reply(city)
+        if reply:
+            return done("get_weather", w, reply)
+        return done("get_weather", w, "Hava durumu alinamadi efendim: %s" % w.get("hata"))
+
+    # --- Doviz kuru (anahtarsiz, LLM'e gitmeden) ---
+    _cur_kw = ("dolar", "usd", "euro", "eur", "avro", "sterlin", "gbp", "frank",
+               "chf", "yen", "jpy", "yuan", "cny", "ruble", "doviz", "döviz")
+    if (any(k in t for k in _cur_kw)
+            and any(k in t for k in ("kur", "ne kadar", "kaç", "kac", "kaç tl", "kac tl", "fiyat", "tl"))):
+        cur = _currency_from_text(text)
+        reply, r = tools.exchange_reply(cur, "TRY")
+        if reply:
+            return done("get_exchange_rate", r, reply)
+        return done("get_exchange_rate", r, "Kur alinamadi efendim: %s" % r.get("hata"))
+
+
+    # --- YouTube / muzik acma ---
+    if "youtube" in t or re.search(r"(^|[\s,.;:!?])çal([\s,.;:!?]|$)", t):
+        q = _youtube_query(text)
+        url = tools.youtube_url(q)
+        reply = ("YouTube'da '%s' ariyorum efendim." % q) if q else "YouTube aciliyor efendim."
+        return done("play_youtube", {"ok": True, "url": url}, reply)
+
     # --- Uygulama / site açma ---
     if any(k in t for k in ("aç", "ac ", "açar mısın", "acar misin", "başlat", "baslat", "açsana")):
         alias = _match_app(t)
         if alias:
+            if not tools.IS_WINDOWS:
+                web = tools.app_web_url(alias) or (alias if alias.startswith("http") else None)
+                if web:
+                    return done("open_app", {"ok": True, "url": web}, "%s web'de aciliyor efendim." % alias)
             res = tools.open_app(alias)
             if res.get("ok"):
                 return done("open_app", res, "%s aciliyor efendim." % alias)
@@ -342,6 +490,52 @@ def _match_app(t):
         if alias in t:
             return alias
     return None
+
+
+_FILLER = {"da", "de", "dan", "den", "için", "icin", "bana", "bir", "acaba", "lütfen",
+           "lutfen", "nasil", "nasıl", "kaç", "kac", "derece", "bugün", "bugun", "yarın",
+           "yarin", "şu", "su", "bu", "var", "mı", "mi", "mu", "mü", "the", "and"}
+
+
+def _tr_lower(s):
+    """Turkce'ye uygun kucuk harf: İ->i, I->ı (birlesik nokta sorununu onler)."""
+    return (s or "").replace("İ", "i").replace("I", "ı").lower()
+
+_YT_TRIGGERS = ["youtube", "you tube", "müzik", "muzik", "şarkı", "sarki", "dinle",
+                "video", "parça", "parca", "playlist", "listesi", "açsana", "çalsana",
+                "açar mısın", "acar misin", "aç", "ac", "çal", "cal", "başlat", "baslat",
+                "üzerinden", "uzerinden", "tane"]
+
+
+def _clean_query(text):
+    low = " " + _tr_lower(text) + " "
+    for w in _YT_TRIGGERS + list(_FILLER):
+        low = re.sub(r"(^|[\s,.;:!?'\"])" + re.escape(w) + r"([\s,.;:!?'\"]|$)", " ", low)
+    low = re.sub(r"[^\wçğıöşüÇĞİÖŞÜ ]+", " ", low)
+    return re.sub(r"\s+", " ", low).strip(" -.,")
+
+
+def _youtube_query(text):
+    return _clean_query(text)
+
+
+def _city_from_text(text):
+    low = _tr_lower(text)
+    for phrase in ("hava durumu", "hava durumunu", "hava nasıl", "hava nasil",
+                   "hava kaç derece", "hava kac derece", "hava sıcaklığı", "hava sicakligi",
+                   "hava kaç", "hava kac", "hava tahmini", "hava tahmin", "hava"):
+        low = low.replace(phrase, " ")
+    low = re.sub(r"[^\wçğıöşüÇĞİÖŞÜ ]+", " ", low)
+    words = [w for w in low.split() if w not in _FILLER]
+    return " ".join(words) or "Istanbul"
+
+
+def _currency_from_text(text):
+    low = _tr_lower(text)
+    for alias, code in tools.CURRENCY_ALIASES.items():
+        if alias in low:
+            return code
+    return "USD"
 
 
 def system_info_reply():
@@ -380,6 +574,16 @@ def _system_prompt(cfg, messages, memory=None):
         "gerekiyorsa aciklama yapmadan ilgili araci cagir; sonuc gelince kisa bir "
         "Turkce cevap ver. Gereksiz arac cagirma."
     )
+    if not tools.IS_WINDOWS:
+        system += (
+            "\n\nONEMLI: Su an WEB/tarayici ortamindasin (kullanicinin telefonu veya "
+            "tabletinde). Bilgisayara ozel araclar (open_app ile program acma, ses "
+            "kontrolu, ekran goruntusu, ekran kilitleme, dosya islemleri) BU ORTAMDA "
+            "CALISMAZ; bunlari denemek yerine kullaniciya bunun yalnizca bilgisayar "
+            "uygulamasinda oldugunu kibarca soyle. Muzik/video icin play_youtube "
+            "(YouTube arama acar), guncel bilgi icin get_weather veya web_search, "
+            "doviz kuru icin get_exchange_rate araclarini kullan."
+        )
     return system
 
 

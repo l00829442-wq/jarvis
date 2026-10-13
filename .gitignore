@@ -15,4 +15,5 @@ build_*/
 dist/
 dist_*/
 *.spec
+!Jarvis.spec
 *.log

@@ -41,7 +41,7 @@ git push -u origin main
    - **Instance Type:** Free
 4. **Environment** sekmesinde değişken ekle:
    - `JARVIS_PROVIDER` = `gemini`   (ayrıca: `deepseek`, `openai`, `groq`, `openrouter`)
-   - `JARVIS_MODEL` = `gemini-3-flash-preview`  (DeepSeek: `deepseek-chat`, OpenAI: `gpt-4o-mini`)
+   - `JARVIS_MODEL` = `gemini-3.5-flash-lite`  (ücretsiz kota ~500/gün; DeepSeek: `deepseek-chat`, OpenAI: `gpt-4o-mini`)
    - `JARVIS_API_KEY` = senin anahtarın (aktif sağlayıcının anahtarı)
 5. **Create Web Service** → birkaç dakika sonra sana şöyle bir adres verir:
    `https://jarvis-xxxx.onrender.com`
@@ -86,6 +86,6 @@ Ses önemliyse Yol A'yı kullan.
 |----------|----------|-------|
 | `JARVIS_API_KEY` | Yapay zeka anahtarı | `AIza...` |
 | `JARVIS_PROVIDER` | `gemini` / `deepseek` / `openai` / `groq` / `openrouter` | `gemini` |
-| `JARVIS_MODEL` | Model adı | `gemini-3-flash-preview` |
+| `JARVIS_MODEL` | Model adı | `gemini-3.5-flash-lite` |
 | `PORT` | (Bulut otomatik verir) | `10000` |
 | `JARVIS_PORT` | Yerel port | `8000` |

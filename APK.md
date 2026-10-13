@@ -15,7 +15,7 @@ olacak: `https://jarvis-xxxx.onrender.com`
 
 Ayrıca Render panelinde şu ortam değişkenini ekle (API anahtarın):
 - `JARVIS_API_KEY` = Gemini anahtarın
-- `JARVIS_MODEL` = `gemini-3-flash-preview`
+- `JARVIS_MODEL` = `gemini-3.5-flash-lite`
 - `JARVIS_PROVIDER` = `gemini` (istersen `deepseek`, `openai`, `groq`, `openrouter`)
 
 > Not: Uygulama içindeki **⚙️ Ayarlar → Yapay zeka sağlayıcı** bölümünden

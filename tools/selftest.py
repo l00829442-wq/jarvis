@@ -117,6 +117,55 @@ def main():
     except Exception as e:
         check("hafiza", False, str(e))
 
+    # 4b) yeni anahtarsiz araclar (hava, doviz, youtube, web arama)
+    try:
+        d, tools, dt = chat("Ankara hava durumu nasıl?")
+        check("hava durumu", "get_weather" in tools and "hava durumu" in (d.get("reply") or "").lower(),
+              "%.1fs" % dt)
+    except Exception as e:
+        check("hava durumu", False, str(e))
+
+    try:
+        d, tools, dt = chat("youtube'dan sezen aksu çal")
+        acts = [a.get("url") for a in (d.get("actions") or [])]
+        check("youtube/actions", "play_youtube" in tools and any("youtube.com" in (u or "") for u in acts),
+              "actions=%s" % acts)
+    except Exception as e:
+        check("youtube/actions", False, str(e))
+
+    try:
+        d, tools, dt = chat("dolar kaç tl?")
+        check("doviz kuru", "get_exchange_rate" in tools and "tl" in (d.get("reply") or "").lower(),
+              "%.1fs" % dt)
+    except Exception as e:
+        check("doviz kuru", False, str(e))
+
+    try:
+        sys.path.insert(0, __import__("os").path.dirname(__import__("os").path.dirname(__import__("os").path.abspath(__file__))))
+        import jarvis_tools
+        import jarvis_agent
+
+        def _retry(fn, tries=2):
+            last = None
+            for _ in range(tries):
+                try:
+                    r = fn()
+                    if isinstance(r, dict) and r.get("ok"):
+                        return r
+                    last = r
+                except Exception as exc:  # noqa: BLE001
+                    last = exc
+                time.sleep(1)
+            return last if isinstance(last, dict) else {"ok": False, "hata": str(last)}
+
+        check("arac: hava (yerel)", _retry(lambda: jarvis_tools.weather("Ankara")).get("ok"))
+        check("arac: doviz (yerel)", _retry(lambda: jarvis_tools.exchange_rate("USD")).get("ok"))
+        ws = _retry(lambda: jarvis_agent._web_search({}, "python programlama dili"))
+        check("arac: web_search (yerel)", ws.get("ok") and len(ws.get("sonuc") or "") > 20,
+              "kaynak=%s" % ws.get("kaynak"))
+    except Exception as e:
+        check("arac: yerel testler", False, str(e))
+
     # 6) memory API
     try:
         s, b, dt = req("/api/memory")

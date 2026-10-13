@@ -26,10 +26,14 @@ Sesle konuşan, soruları yanıtlayan ve hatırlatan ücretsiz bir Jarvis asista
 - 🛠️ **Araç kullanımı (ajan)**: uygulama/site açma, sistem bilgisi, ekran görüntüsü,
   kilit, ses denetimi, dosya yaz/oku/listele, web arama (ReAct/function-calling)
 - 🖼️ **Görsel anlama (vision)**: görsel yükle / sürükle-bırak / Ctrl+V → Jarvis inceler
-- 🔎 **Güncel bilgi**: web araması ile haber/hava/mac/fiyat soruları
+- 🔎 **Güncel bilgi (kota dostu)**: **anahtarsız** web arama (DuckDuckGo + Wikipedia),
+  🌤️ **hava durumu** (Open-Meteo), 💱 **döviz kuru** (frankfurter) — ekstra ücret yok
+- 🎵 **Müzik/video**: "YouTube'dan ... çal" dediğinde sonuç bağlantısı sayfada açılır
+  (bulut/telefonda bile çalışır, çünkü bağlantı tarayıcıda açılır)
 - 🌐 **Çok sağlayıcı**: Gemini, ChatGPT (OpenAI), **DeepSeek**, Groq, OpenRouter —
   Ayarlar'dan seçilir; araç çağırma açık uyumlu modellerde çalışır
-- ⚡ **Akıllı komutlar** ve **hızlı yol** (net komutlar ~0.1 sn'de, LLM beklemeden)
+- ⚡ **Akıllı komutlar** ve **hızlı yol** (hava/döviz/YouTube/saat gibi net komutlar
+  ~0.1 sn'de, LLM ve kota harcamadan)
 - ⏰ Sesli hatırlatıcılar, 🔔 bildirimler, 🏠 IFTTT/webhook akıllı ev kısayolları
 - 🔄 **Kendini güncelleme**: arayüz otomatik yenilenir; `.exe` (opsiyonel `update_url` ile)
 - 📴 API anahtarı olmasa bile **çevrimdışı modda** çalışır
@@ -76,9 +80,16 @@ Anahtar olmadan da çalışır ama gerçek yapay zeka için bir tane alın:
 {
   "provider": "gemini",
   "api_key": "BURAYA_ANAHTARINI_YAPISTIR",
-  "model": "gemini-3-flash-preview"
+  "model": "gemini-3.5-flash-lite"
 }
 ```
+
+> **Önemli (ücretsiz kota):** Google'ın ücretsiz katmanında `gemini-3-flash-preview`
+> ve benzeri **3.x Flash** modelleri **günde yalnızca 20 istek** verir ve çabucak
+> tükenir ("429 / quota" hatası). Bu yüzden varsayılan model **`gemini-3.5-flash-lite`
+> (günde ~500 istek)** yapıldı. Kod, sırayla birden çok modele düşerek (fallback)
+> kotayı ve kesintiyi en aza indirir. Ayrıca hava durumu, döviz, saat gibi komutlar
+> **modeli hiç çağırmadan** (anahtarsız servislerle) yanıt verir.
 
 > En kolayı: uygulamayı aç, **⚙️ Ayarlar → Yapay zeka sağlayıcı** seç (Gemini /
 > ChatGPT / DeepSeek / Groq / OpenRouter), model ve anahtarı yaz → **kaydet**.
@@ -166,4 +177,11 @@ Telefondan her yerden (ve mikrofonla) kullanmak için ücretsiz yayın adımlar�
   Control** imzasız uygulamayı engelliyor demektir. Çözüm: masaüstündeki **Jarvis**
   kısayolunu kullan (Python ile çalışır, engellenmez) **veya** Smart App Control'ü
   kapat (Ayarlar → Gizlilik ve güvenlik → Windows Güvenliği).
+- **"429 / kota doldu" hatası**: Gemini ücretsiz katmanı çok dardır (3.x Flash =
+  günde 20). Varsayılan `gemini-3.5-flash-lite` (günde ~500) kullanın; kod zaten
+  otomatik olarak yedek modellere geçer. Hava/döviz/saat gibi komutlar modeli hiç
+  çağırmaz.
+- **Hava durumu/döviz çalışmıyor**: Bu araçlar internet erişimi ister (anahtarsız
+  servisler: Open-Meteo, frankfurter). Ağ yoksa veya geçici kesinti olursa tekrar
+  deneyin.
 - **Test**: `python tools/selftest.py` (sunucu açıkken) tüm özellikleri sınar.
