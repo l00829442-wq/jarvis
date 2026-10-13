@@ -152,6 +152,20 @@ WMO_TR = {
     95: "gok gurultulu firtina", 96: "dolulu firtina", 99: "siddetli dolulu firtina",
 }
 
+WX_TR = {
+    "sunny": "acik", "clear": "acik", "partly cloudy": "parcali bulutlu",
+    "cloudy": "kapali", "overcast": "kapali", "mist": "sisli", "fog": "sisli",
+    "patchy rain possible": "hafif yagmurlu", "patchy rain nearby": "hafif yagmurlu",
+    "light rain": "hafif yagmurlu", "light drizzle": "hafif cisenti",
+    "moderate rain": "yagmurlu", "heavy rain": "siddetli yagmurlu",
+    "light rain shower": "hafif saganak", "moderate or heavy rain shower": "saganak",
+    "thundery outbreaks possible": "gok gurultulu firtina", "thundery outbreaks in nearby": "gok gurultulu firtina",
+    "patchy light snow": "hafif kar", "light snow": "hafif kar",
+    "moderate snow": "kar", "heavy snow": "yogun kar",
+    "blizzard": "yogun kar saganagi", "patchy snow possible": "hafif kar",
+    "blowing snow": "kar saganagi",
+}
+
 
 def _http_json(url, timeout=15):
     req = urllib.request.Request(url, headers={"User-Agent": "Jarvis/1.0"})
@@ -159,8 +173,43 @@ def _http_json(url, timeout=15):
         return json.loads(resp.read().decode("utf-8"))
 
 
+def _weather_wttr(city):
+    """Yedek hava kaynagi (wttr.in, anahtarsiz). Open-Meteo 429 verince kullanilir."""
+    url = "https://wttr.in/" + urllib.parse.quote(city or "Istanbul") + "?format=j1"
+    data = _http_json(url, timeout=25)
+    cur = (data.get("current_condition") or [{}])[0]
+    area = ((data.get("nearest_area") or [{}])[0].get("areaName") or [{}])[0].get("value")
+    return {
+        "ok": True,
+        "sehir": area or city,
+        "ulke": ((data.get("nearest_area") or [{}])[0].get("country") or [{}])[0].get("value"),
+        "sicaklik": _num(cur.get("temp_C")),
+        "hissedilen": _num(cur.get("FeelsLikeC")),
+        "nem": _num(cur.get("humidity")),
+        "ruzgar": _num(cur.get("windspeedKmph")),
+        "durum": WX_TR.get((cur.get("weatherDesc") or [{}])[0].get("value", "").strip().lower(),
+                           (cur.get("weatherDesc") or [{}])[0].get("value", "?")),
+        "gunler": [
+            {"tarih": w.get("date"), "min": _num(w.get("mintempC")), "max": _num(w.get("maxtempC")),
+             "durum": WX_TR.get(((w.get("hourly") or [{}])[4].get("weatherDesc") or [{}])[0].get("value", "").strip().lower(), "?")}
+            for w in (data.get("weather") or [])
+        ],
+        "kaynak": "wttr",
+    }
+
+
+def _num(v):
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return v
+
+
 def weather(city="Istanbul"):
-    """Open-Meteo (anahtarsiz) ile anlik + 3 gunluk hava durumu."""
+    """Hava durumu: once Open-Meteo (anahtarsiz); 429/hata olursa wttr.in yedegi."""
     city = (city or "Istanbul").strip()
     try:
         geo = _http_json("https://geocoding-api.open-meteo.com/v1/search?"
@@ -195,9 +244,14 @@ def weather(city="Istanbul"):
             "ruzgar": cur.get("wind_speed_10m"),
             "durum": WMO_TR.get(cur.get("weather_code"), "?"),
             "gunler": days,
+            "kaynak": "open-meteo",
         }
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        return _weather_wttr(city)
     except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "hata": str(exc)}
+        return {"ok": False, "hata": "Hava durumu alinamadi: " + str(exc)}
 
 
 def weather_reply(city="Istanbul"):
